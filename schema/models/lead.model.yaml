@@ -1,0 +1,124 @@
+# =============================================================================
+# Module: backbone-lead
+# Entity: Lead
+# Description: Unqualified inbound interest with a PROVISIONAL identity — a Lead is
+# NOT a Party. WhatsApp-first capture (phone + whatsapp_no) is the Indonesia
+# differentiator. A Lead qualifies into an Opportunity (→ backbone-deal) and
+# converts (once per lead) into a backbone-party Customer via an ACL step
+# (`LeadConverted` event) — `party_id` back-links the minted/matched Customer
+# (logical FK, no DB FK). Posts NO GL.
+#
+# convert-once fix (2026-08-04): party_id anchors an existing Party; many Leads
+# may share one party over time so a converted Customer can re-enter the pipeline
+# (a repeat whatsapp_no → new Lead on the same Party). Conversion stays once per
+# Lead; it no longer assumes one Party per customer-lifetime.
+# =============================================================================
+
+models:
+  - name: Lead
+    collection: leads
+    description: "Unqualified inbound interest; provisional identity until converted"
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique lead id"
+      company_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Org owner # logical FK to organization.Company.id"
+      lead_name:
+        type: string
+        attributes: ["@required", "@max(140)"]
+        description: "Person's name"
+      organization_name:
+        type: string?
+        attributes: ["@max(140)"]
+        description: "Company the lead represents (if B2B)"
+      # --- WhatsApp-first capture (the local edge) ---
+      phone:
+        type: string?
+        attributes: ["@max(30)"]
+        description: "Phone number"
+      whatsapp_no:
+        type: string?
+        attributes: ["@max(30)"]
+        description: "WhatsApp number — the primary SMB sales channel in Indonesia"
+      email:
+        type: string?
+        attributes: ["@max(160)"]
+        description: "Email (secondary)"
+      # --- attribution (Campaign master lives in backbone-deal → cross-module logical FK) ---
+      source:
+        type: LeadSource
+        attributes: ["@required", "@default(whatsapp)"]
+        description: "Where the lead came from"
+      campaign_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Attributed campaign # logical FK to deal.Campaign.id (cross-module)"
+      # --- pipeline ---
+      status:
+        type: LeadStatus
+        attributes: ["@required", "@default(new)"]
+        description: "Lead lifecycle state"
+      # --- convert-once anchor ---
+      party_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "The Customer this lead resolved to on conversion # logical FK to party.Party.id. Many leads may share one party over time — a converted Customer can re-enter the pipeline."
+      converted_at:
+        type: datetime?
+        description: "When the lead was first resolved to a Party"
+      notes:
+        type: string?
+        attributes: ["@max(2000)"]
+        description: "Free-text notes"
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata"
+    indexes:
+      - type: index
+        fields: [company_id, status]
+      - type: index
+        fields: [company_id, whatsapp_no]
+      - type: index
+        fields: [party_id]
+      - type: index
+        fields: [campaign_id]
+
+enums:
+  - name: LeadSource
+    description: "Attribution source for a lead"
+    variants:
+      - name: whatsapp
+        description: "WhatsApp inbound (primary)"
+        default: true
+      - name: instagram
+        description: "Instagram / social"
+      - name: referral
+        description: "Referral / word of mouth"
+      - name: website
+        description: "Website form"
+      - name: walk_in
+        description: "Walk-in / offline"
+      - name: other
+        description: "Other"
+
+  - name: LeadStatus
+    description: "Lead pipeline state"
+    variants:
+      - name: new
+        description: "Fresh, uncontacted"
+        default: true
+      - name: contacted
+        description: "Reached out"
+      - name: qualified
+        description: "Qualified into an Opportunity"
+      - name: converted
+        description: "Resolved to a Customer (Party)"
+      - name: junk
+        description: "Junk / not a real lead"
+      - name: lost
+        description: "Lost (no deal)"
