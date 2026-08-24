@@ -11,6 +11,6 @@ pub use lead_event_handlers::LeadEventHandler;
 // <<< CUSTOM
 pub mod lead_conversion_events;
 pub use lead_conversion_events::{
-    LeadQualified, LeadConverted, LeadConversionEvent, LeadEventSink, LoggingLeadSink,
+    LeadQualified, LeadConverted, LeadMerged, LeadConversionEvent, LeadEventSink, LoggingLeadSink,
 };
 // END CUSTOM

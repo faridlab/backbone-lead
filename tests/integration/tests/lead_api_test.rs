@@ -36,6 +36,10 @@ impl TestDataGenerator for LeadTestData {
             "party_id": null,
             "converted_at": now,
             "notes": null,
+            "owner_user_id": null,
+            "sales_team_id": null,
+            "merged_into_lead_id": null,
+            "merged_at": now,
             "metadata": json!({}),
         })
     }
@@ -56,6 +60,10 @@ impl TestDataGenerator for LeadTestData {
             "party_id": null,
             "converted_at": now,
             "notes": null,
+            "owner_user_id": null,
+            "sales_team_id": null,
+            "merged_into_lead_id": null,
+            "merged_at": now,
             "metadata": json!({}),
         })
     }

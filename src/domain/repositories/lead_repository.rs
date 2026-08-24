@@ -55,12 +55,15 @@ pub struct LeadFilter {
     pub status: Option<LeadStatus>,
     pub party_id: Option<Uuid>,
     pub notes: Option<String>,
+    pub owner_user_id: Option<Uuid>,
+    pub sales_team_id: Option<Uuid>,
+    pub merged_into_lead_id: Option<Uuid>,
 }
 
 impl LeadFilter {
     /// Check if any filter is set
     pub fn has_filters(&self) -> bool {
-        self.company_id.is_some() || self.lead_name.is_some() || self.organization_name.is_some() || self.phone.is_some() || self.whatsapp_no.is_some() || self.email.is_some() || self.source.is_some() || self.campaign_id.is_some() || self.status.is_some() || self.party_id.is_some() || self.notes.is_some()
+        self.company_id.is_some() || self.lead_name.is_some() || self.organization_name.is_some() || self.phone.is_some() || self.whatsapp_no.is_some() || self.email.is_some() || self.source.is_some() || self.campaign_id.is_some() || self.status.is_some() || self.party_id.is_some() || self.notes.is_some() || self.owner_user_id.is_some() || self.sales_team_id.is_some() || self.merged_into_lead_id.is_some()
     }
 }
 

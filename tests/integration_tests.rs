@@ -23,4 +23,3 @@ async fn test_lead_api() {
         panic!("{} tests failed", failed.len());
     }
 }
-

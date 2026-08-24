@@ -64,6 +64,14 @@ pub struct CreateLeadDto {
     #[cfg_attr(feature = "validation", validate(length(max = 2000)))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "owner_user_id")]
+    pub owner_user_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "sales_team_id")]
+    pub sales_team_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "merged_into_lead_id")]
+    pub merged_into_lead_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "merged_at")]
+    pub merged_at: Option<DateTime<Utc>>,
 }
 
 // =============================================================================
@@ -109,6 +117,14 @@ pub struct UpdateLeadDto {
     #[cfg_attr(feature = "validation", validate(length(max = 2000)))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "owner_user_id")]
+    pub owner_user_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "sales_team_id")]
+    pub sales_team_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "merged_into_lead_id")]
+    pub merged_into_lead_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "merged_at")]
+    pub merged_at: Option<DateTime<Utc>>,
 }
 
 // =============================================================================
@@ -156,12 +172,20 @@ pub struct PatchLeadDto {
     #[cfg_attr(feature = "validation", validate(length(max = 2000)))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "owner_user_id")]
+    pub owner_user_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "sales_team_id")]
+    pub sales_team_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "merged_into_lead_id")]
+    pub merged_into_lead_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "merged_at")]
+    pub merged_at: Option<DateTime<Utc>>,
 }
 
 impl PatchLeadDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.company_id.is_some() || self.lead_name.is_some() || self.organization_name.is_some() || self.phone.is_some() || self.whatsapp_no.is_some() || self.email.is_some() || self.source.is_some() || self.campaign_id.is_some() || self.status.is_some() || self.party_id.is_some() || self.converted_at.is_some() || self.notes.is_some()
+        self.company_id.is_some() || self.lead_name.is_some() || self.organization_name.is_some() || self.phone.is_some() || self.whatsapp_no.is_some() || self.email.is_some() || self.source.is_some() || self.campaign_id.is_some() || self.status.is_some() || self.party_id.is_some() || self.converted_at.is_some() || self.notes.is_some() || self.owner_user_id.is_some() || self.sales_team_id.is_some() || self.merged_into_lead_id.is_some() || self.merged_at.is_some()
     }
 }
 
@@ -193,6 +217,10 @@ pub struct LeadResponseDto {
     pub party_id: Option<Uuid>,
     pub converted_at: Option<DateTime<Utc>>,
     pub notes: Option<String>,
+    pub owner_user_id: Option<Uuid>,
+    pub sales_team_id: Option<Uuid>,
+    pub merged_into_lead_id: Option<Uuid>,
+    pub merged_at: Option<DateTime<Utc>>,
     pub metadata: AuditMetadata,
 }
 
@@ -276,6 +304,10 @@ impl From<Lead> for LeadResponseDto {
             party_id: entity.party_id,
             converted_at: entity.converted_at,
             notes: entity.notes,
+            owner_user_id: entity.owner_user_id,
+            sales_team_id: entity.sales_team_id,
+            merged_into_lead_id: entity.merged_into_lead_id,
+            merged_at: entity.merged_at,
             metadata: entity.metadata,
         }
     }
@@ -310,6 +342,10 @@ impl From<CreateLeadDto> for Lead {
             party_id: dto.party_id,
             converted_at: dto.converted_at,
             notes: dto.notes,
+            owner_user_id: dto.owner_user_id,
+            sales_team_id: dto.sales_team_id,
+            merged_into_lead_id: dto.merged_into_lead_id,
+            merged_at: dto.merged_at,
             metadata: AuditMetadata::default(),
         }
     }
@@ -331,6 +367,10 @@ impl From<&Lead> for LeadResponseDto {
             party_id: entity.party_id.clone(),
             converted_at: entity.converted_at.clone(),
             notes: entity.notes.clone(),
+            owner_user_id: entity.owner_user_id.clone(),
+            sales_team_id: entity.sales_team_id.clone(),
+            merged_into_lead_id: entity.merged_into_lead_id.clone(),
+            merged_at: entity.merged_at.clone(),
             metadata: entity.metadata.clone(),
         }
     }
@@ -356,6 +396,10 @@ impl backbone_core::ApplyUpdateDto<UpdateLeadDto> for Lead {
         self.party_id = dto.party_id;
         self.converted_at = dto.converted_at;
         self.notes = dto.notes;
+        self.owner_user_id = dto.owner_user_id;
+        self.sales_team_id = dto.sales_team_id;
+        self.merged_into_lead_id = dto.merged_into_lead_id;
+        self.merged_at = dto.merged_at;
         Ok(self)
     }
 }
@@ -368,4 +412,3 @@ impl backbone_core::ApplyUpdateDto<UpdateLeadDto> for Lead {
 // Add custom DTOs specific to Lead here.
 // This section will be preserved during regeneration.
 // >>> END CUSTOM DTOs
-

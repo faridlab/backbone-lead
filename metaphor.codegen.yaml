@@ -19,19 +19,29 @@ user_owned:
   # doesn't resurrect the skeleton's example saga.
   - "src/application/workflows/mod.rs"
 
-  # Hand-written Lead SQL (capture + once-only conversion claim). Ported from backbone-crm;
-  # regen must not clobber it.
+  # Hand-written Lead SQL (capture + once-only conversion claim, duplicate-candidate
+  # scan + merge). Ported from backbone-crm; regen must not clobber it.
   - "src/infrastructure/persistence/lead_repository.rs"
 
-  # Hand-authored lead write-path: the PartyPort seam, the conversion events, the capture service.
+  # Hand-authored lead write-path: the PartyPort seam, the conversion events, the capture service,
+  # and the dedup/merge extension (candidate scan + merge verbs).
   - "src/application/service/lead_ports.rs"
   - "src/application/service/lead_write_service.rs"
+  - "src/application/service/lead_merge.rs"
   - "src/domain/event/lead_conversion_events.rs"
+
+  # Guarded route composition (read surface + validated capture/merge verbs, tenant from token).
+  - "src/presentation/http/guarded_routes.rs"
 
   # Behavior tests (the golden cases / oracle) + BDD features.
   - "tests/features/**"
-  # - "tests/*_golden_cases.rs"
-  # - "tests/integrity_probes.rs"
+  - "tests/lead_merge_cases.rs"
+  - "tests/lead_merge_routes_test.rs"
+
+  # Hand-written reshape migration for a published table (the generator only emits
+  # create-table migrations for NEW entities; reshapes are hand-authored).
+  - "migrations/20260824120000_lead_dedup_merge.up.sql"
+  - "migrations/20260824120000_lead_dedup_merge.down.sql"
 
   # Hand-authored module documentation.
   - "docs/**"

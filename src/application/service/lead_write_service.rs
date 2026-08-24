@@ -5,11 +5,22 @@
 //! `convert_lead` (mints a party Customer + back-fills deals) — lives in backbone-crm-app,
 //! because both span lead + deal repos in one transaction. This service owns only the
 //! lead-only capture. Ported from backbone-crm's `crm_write_service.rs` (lead parts).
+//!
+//! **This file is the hub:** it holds the write-path vocabulary (input structs, outcomes,
+//! errors) and the constructors. The dedup/merge surface — the duplicate-candidate scan and
+//! the merge verbs — is chunked into the sibling [`super::lead_merge`] as a second
+//! `impl LeadWriteService` block over these same types.
+//!
+//! Events: the service carries an [`LeadEventSink`] (default: logging). Merge publishes
+//! `LeadMerged` through it after commit; qualify/convert stay app-side as before.
+
+use std::sync::Arc;
 
 use backbone_orm::company_scope;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::domain::event::{LeadEventSink, LoggingLeadSink};
 use crate::infrastructure::persistence::{LeadRepository, NewLeadRow};
 
 #[derive(Debug, thiserror::Error)]
@@ -22,6 +33,37 @@ pub enum LeadError {
     Invalid(String),
     #[error("party rejected: {0}")]
     PartyRejected(String),
+    #[error("invalid batch: {0}")]
+    InvalidBatch(String),
+    #[error("lead {0} is converted and can never be absorbed into another lead")]
+    AbsorbConverted(Uuid),
+    #[error("a lead cannot be absorbed into itself")]
+    AbsorbSelf,
+    #[error("absorb chain exceeded the maximum depth")]
+    ChainTooDeep,
+}
+
+impl LeadError {
+    /// Stable machine-readable code for API responses (the selling error shape).
+    pub fn code(&self) -> String {
+        match self {
+            LeadError::Db(_) => "internal_error".into(),
+            LeadError::NotFound(_) => "not_found".into(),
+            LeadError::Invalid(_) => "invalid_input".into(),
+            LeadError::PartyRejected(_) => "party_rejected".into(),
+            LeadError::InvalidBatch(_) => "invalid_batch".into(),
+            LeadError::AbsorbConverted(_) => "absorb_converted".into(),
+            LeadError::AbsorbSelf => "absorb_self".into(),
+            LeadError::ChainTooDeep => "chain_too_deep".into(),
+        }
+    }
+    pub fn http_status(&self) -> u16 {
+        match self {
+            LeadError::Db(_) | LeadError::ChainTooDeep => 500,
+            LeadError::NotFound(_) => 404,
+            _ => 422,
+        }
+    }
 }
 
 pub struct NewLead {
@@ -34,17 +76,29 @@ pub struct NewLead {
     pub source: String, // lead_source variant
     pub campaign_id: Option<Uuid>,
     pub notes: Option<String>,
+    /// Assigned salesperson — STORED only; assignment policy (autofill, leader fallback) is the
+    /// composing service's job.
+    pub owner_user_id: Option<Uuid>,
+    /// Assigned sales team — STORED only, same host-side policy rule as the owner.
+    pub sales_team_id: Option<Uuid>,
 }
 
 pub struct LeadWriteService {
-    pool: PgPool,
-    leads: LeadRepository,
+    pub(super) pool: PgPool,
+    pub(super) leads: LeadRepository,
+    pub(super) sink: Arc<dyn LeadEventSink>,
 }
 
 impl LeadWriteService {
     pub fn new(pool: PgPool) -> Self {
+        Self::with_sink(pool, Arc::new(LoggingLeadSink))
+    }
+
+    /// Construct with a custom event sink (outbox, bus, recorder) — merge publishes
+    /// `LeadMerged` through it.
+    pub fn with_sink(pool: PgPool, sink: Arc<dyn LeadEventSink>) -> Self {
         let leads = LeadRepository::new(pool.clone());
-        Self { pool, leads }
+        Self { pool, leads, sink }
     }
 
     /// Capture a lead (WhatsApp-first). At least one contact channel is required.
@@ -69,6 +123,8 @@ impl LeadWriteService {
                     source: &l.source,
                     campaign_id: l.campaign_id,
                     notes: l.notes.as_deref(),
+                    owner_user_id: l.owner_user_id,
+                    sales_team_id: l.sales_team_id,
                 })
                 .await?;
             Ok(id)

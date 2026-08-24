@@ -12,6 +12,19 @@
 # may share one party over time so a converted Customer can re-enter the pipeline
 # (a repeat whatsapp_no → new Lead on the same Party). Conversion stays once per
 # Lead; it no longer assumes one Party per customer-lifetime.
+#
+# dedup/merge (2026-08-24): duplicate leads are SOFT-ABSORBED, never deleted —
+# `merged_into_lead_id` (+ `merged_at`) marks a lead as absorbed into its master;
+# absorbed leads are excluded from duplicate candidate scans and can never be a
+# master or a dupe again. Merge field-fill rule: the MASTER's non-null values
+# win; each nullable lead-owned field (organization_name, phone, whatsapp_no,
+# email, notes, campaign_id, owner_user_id, sales_team_id) fills from the first
+# non-null value walking the dupes in confidence order (status precedence →
+# party anchor → newest created_at → smallest id). party_id / converted_at are
+# never filled — conversion is once per lead. Normalized match keys
+# (phone_key / whatsapp_key / email_key / org_key) are DB-level generated
+# columns declared in the reshape migration, not here — they are indexing
+# detail, same tier as RLS policies and audit triggers.
 # =============================================================================
 
 models:
@@ -74,6 +87,23 @@ models:
         type: string?
         attributes: ["@max(2000)"]
         description: "Free-text notes"
+      # --- assignment (stored only; assignment POLICY is host-side) ---
+      owner_user_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Assigned salesperson # logical FK to sapiens.User.id. Stored only — autofill/leader-fallback defaults are the composing service's job, not this module's."
+      sales_team_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Assigned sales team # logical FK to selling.SalesTeam.id (cross-module, no cargo edge). Stored only — team-resolution defaults are host-side."
+      # --- dedup/merge (soft-absorb; dupes are never deleted) ---
+      merged_into_lead_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Master this lead was absorbed into # self-reference, logical FK to Lead.id. Non-null = absorbed: excluded from candidate scans, never a master."
+      merged_at:
+        type: datetime?
+        description: "When this lead was absorbed into its master"
       metadata:
         type: Metadata
         attributes: ["@audit_metadata"]
@@ -87,6 +117,12 @@ models:
         fields: [party_id]
       - type: index
         fields: [campaign_id]
+      - type: index
+        fields: [company_id, owner_user_id]
+      - type: index
+        fields: [company_id, sales_team_id]
+      - type: index
+        fields: [merged_into_lead_id]
 
 enums:
   - name: LeadSource

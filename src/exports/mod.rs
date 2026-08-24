@@ -8,7 +8,7 @@
 //! ## Usage from other modules
 //!
 //! ```text
-//! use lead::exports::{LeadDto, LeadQueryService};
+//! use lead::exports::{LeadDto};
 //! ```
 
 mod types;
@@ -30,9 +30,6 @@ pub use events::*;
 /// - `LeadDto` - Data transfer object for Lead
 /// - `LeadSummary` - Summary view of Lead
 /// - `LeadId` - Type-safe ID wrapper
-///
-/// ## Public Services
-/// - `LeadQueryService` - Read-only queries
 ///
 /// ## Public Events
 /// - `LeadCreatedEvent` - Published when Lead is created

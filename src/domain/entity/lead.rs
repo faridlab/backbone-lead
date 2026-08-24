@@ -63,6 +63,10 @@ pub struct Lead {
     pub party_id: Option<Uuid>,
     pub converted_at: Option<DateTime<Utc>>,
     pub notes: Option<String>,
+    pub owner_user_id: Option<Uuid>,
+    pub sales_team_id: Option<Uuid>,
+    pub merged_into_lead_id: Option<Uuid>,
+    pub merged_at: Option<DateTime<Utc>>,
     #[serde(default)]
     #[sqlx(json)]
     pub metadata: AuditMetadata,
@@ -71,7 +75,7 @@ pub struct Lead {
 impl Lead {
     /// Create a builder for Lead
     pub fn builder() -> LeadBuilder {
-        LeadBuilder::default()
+        <LeadBuilder as Default>::default()
     }
 
     /// Create a new Lead with required fields
@@ -90,6 +94,10 @@ impl Lead {
             party_id: None,
             converted_at: None,
             notes: None,
+            owner_user_id: None,
+            sales_team_id: None,
+            merged_into_lead_id: None,
+            merged_at: None,
             metadata: AuditMetadata::default(),
         }
     }
@@ -202,6 +210,30 @@ impl Lead {
         self
     }
 
+    /// Set the owner_user_id field (chainable)
+    pub fn with_owner_user_id(mut self, value: Uuid) -> Self {
+        self.owner_user_id = Some(value);
+        self
+    }
+
+    /// Set the sales_team_id field (chainable)
+    pub fn with_sales_team_id(mut self, value: Uuid) -> Self {
+        self.sales_team_id = Some(value);
+        self
+    }
+
+    /// Set the merged_into_lead_id field (chainable)
+    pub fn with_merged_into_lead_id(mut self, value: Uuid) -> Self {
+        self.merged_into_lead_id = Some(value);
+        self
+    }
+
+    /// Set the merged_at field (chainable)
+    pub fn with_merged_at(mut self, value: DateTime<Utc>) -> Self {
+        self.merged_at = Some(value);
+        self
+    }
+
     // ==========================================================
     // Partial Update
     // ==========================================================
@@ -245,6 +277,18 @@ impl Lead {
                 }
                 "notes" => {
                     if let Ok(v) = serde_json::from_value(value) { self.notes = v; }
+                }
+                "owner_user_id" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.owner_user_id = v; }
+                }
+                "sales_team_id" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.sales_team_id = v; }
+                }
+                "merged_into_lead_id" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.merged_into_lead_id = v; }
+                }
+                "merged_at" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.merged_at = v; }
                 }
                 _ => {} // ignore unknown fields
             }
@@ -303,6 +347,9 @@ impl backbone_orm::EntityRepoMeta for Lead {
         m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("campaign_id".to_string(), "uuid".to_string());
         m.insert("party_id".to_string(), "uuid".to_string());
+        m.insert("owner_user_id".to_string(), "uuid".to_string());
+        m.insert("sales_team_id".to_string(), "uuid".to_string());
+        m.insert("merged_into_lead_id".to_string(), "uuid".to_string());
         m.insert("source".to_string(), "lead_source".to_string());
         m.insert("status".to_string(), "lead_status".to_string());
         m
@@ -333,6 +380,10 @@ pub struct LeadBuilder {
     party_id: Option<Uuid>,
     converted_at: Option<DateTime<Utc>>,
     notes: Option<String>,
+    owner_user_id: Option<Uuid>,
+    sales_team_id: Option<Uuid>,
+    merged_into_lead_id: Option<Uuid>,
+    merged_at: Option<DateTime<Utc>>,
 }
 
 impl LeadBuilder {
@@ -408,6 +459,30 @@ impl LeadBuilder {
         self
     }
 
+    /// Set the owner_user_id field (optional)
+    pub fn owner_user_id(mut self, value: Uuid) -> Self {
+        self.owner_user_id = Some(value);
+        self
+    }
+
+    /// Set the sales_team_id field (optional)
+    pub fn sales_team_id(mut self, value: Uuid) -> Self {
+        self.sales_team_id = Some(value);
+        self
+    }
+
+    /// Set the merged_into_lead_id field (optional)
+    pub fn merged_into_lead_id(mut self, value: Uuid) -> Self {
+        self.merged_into_lead_id = Some(value);
+        self
+    }
+
+    /// Set the merged_at field (optional)
+    pub fn merged_at(mut self, value: DateTime<Utc>) -> Self {
+        self.merged_at = Some(value);
+        self
+    }
+
     /// Build the Lead entity
     ///
     /// Returns Err if any required field without a default is missing.
@@ -423,12 +498,16 @@ impl LeadBuilder {
             phone: self.phone,
             whatsapp_no: self.whatsapp_no,
             email: self.email,
-            source: self.source.unwrap_or(LeadSource::default()),
+            source: self.source.unwrap_or_default(),
             campaign_id: self.campaign_id,
-            status: self.status.unwrap_or(LeadStatus::default()),
+            status: self.status.unwrap_or_default(),
             party_id: self.party_id,
             converted_at: self.converted_at,
             notes: self.notes,
+            owner_user_id: self.owner_user_id,
+            sales_team_id: self.sales_team_id,
+            merged_into_lead_id: self.merged_into_lead_id,
+            merged_at: self.merged_at,
             metadata: AuditMetadata::default(),
         })
     }

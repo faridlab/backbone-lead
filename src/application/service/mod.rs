@@ -12,10 +12,12 @@ pub mod lead_service;
 // <<< CUSTOM
 pub mod lead_ports;
 pub mod lead_write_service;
+pub mod lead_merge;
 // END CUSTOM
 
 pub use lead_service::LeadService;
 // <<< CUSTOM
 pub use lead_ports::{PartyPort, CustomerFromLead, PartyAck, CrmRejected};
 pub use lead_write_service::{LeadWriteService, NewLead, LeadError};
+pub use lead_merge::{DuplicateGroup, GroupMember, MergeOutcome, AbsorbedElsewhere};
 // END CUSTOM

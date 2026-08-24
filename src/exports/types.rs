@@ -60,6 +60,10 @@ pub struct LeadDto {
     pub party_id: Option<Uuid>,
     pub converted_at: Option<DateTime<Utc>>,
     pub notes: Option<String>,
+    pub owner_user_id: Option<Uuid>,
+    pub sales_team_id: Option<Uuid>,
+    pub merged_into_lead_id: Option<Uuid>,
+    pub merged_at: Option<DateTime<Utc>>,
     pub metadata: serde_json::Value,
 }
 

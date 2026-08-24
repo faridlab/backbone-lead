@@ -8,6 +8,9 @@ mod lead_repository;
 
 // Custom persistence modules
 // <<< CUSTOM
+pub use lead_repository::{
+    DuplicateKeyGroupRow, LeadForConvertRow, LeadForQualifyRow, LeadMatchRow, NewLeadRow,
+};
 // END CUSTOM
 
 // Re-exports
@@ -22,5 +25,4 @@ pub use backbone_orm::repository::{
 
 // Re-export custom persistence types
 // <<< CUSTOM
-pub use lead_repository::{NewLeadRow, LeadForQualifyRow, LeadForConvertRow};
 // END CUSTOM

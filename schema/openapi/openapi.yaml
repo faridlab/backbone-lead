@@ -438,6 +438,22 @@ components:
           nullable: true
           type: string
           maxLength: 2000
+        owner_user_id:
+          nullable: true
+          type: string
+          format: uuid
+        sales_team_id:
+          nullable: true
+          type: string
+          format: uuid
+        merged_into_lead_id:
+          nullable: true
+          type: string
+          format: uuid
+        merged_at:
+          nullable: true
+          type: string
+          format: date-time
         metadata:
           type: object
 
@@ -505,6 +521,22 @@ components:
           nullable: true
           type: string
           maxLength: 2000
+        owner_user_id:
+          nullable: true
+          type: string
+          format: uuid
+        sales_team_id:
+          nullable: true
+          type: string
+          format: uuid
+        merged_into_lead_id:
+          nullable: true
+          type: string
+          format: uuid
+        merged_at:
+          nullable: true
+          type: string
+          format: date-time
         metadata:
           type: object
 
@@ -559,6 +591,22 @@ components:
           nullable: true
           type: string
           maxLength: 2000
+        owner_user_id:
+          nullable: true
+          type: string
+          format: uuid
+        sales_team_id:
+          nullable: true
+          type: string
+          format: uuid
+        merged_into_lead_id:
+          nullable: true
+          type: string
+          format: uuid
+        merged_at:
+          nullable: true
+          type: string
+          format: date-time
         metadata:
           type: object
 
@@ -607,6 +655,22 @@ components:
           nullable: true
           type: string
           maxLength: 2000
+        owner_user_id:
+          nullable: true
+          type: string
+          format: uuid
+        sales_team_id:
+          nullable: true
+          type: string
+          format: uuid
+        merged_into_lead_id:
+          nullable: true
+          type: string
+          format: uuid
+        merged_at:
+          nullable: true
+          type: string
+          format: date-time
         metadata:
           type: object
 
