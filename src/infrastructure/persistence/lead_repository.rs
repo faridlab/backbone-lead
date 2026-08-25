@@ -61,6 +61,9 @@ pub struct NewLeadRow<'a> {
     pub notes: Option<&'a str>,
     pub owner_user_id: Option<Uuid>,
     pub sales_team_id: Option<Uuid>,
+    pub utm_source: Option<&'a str>,
+    pub utm_medium: Option<&'a str>,
+    pub utm_campaign: Option<&'a str>,
 }
 
 /// The qualification pre-flight projection: the company to bind, the live status, the party the
@@ -113,6 +116,9 @@ pub struct LeadMatchRow {
     pub campaign_id: Option<Uuid>,
     pub owner_user_id: Option<Uuid>,
     pub sales_team_id: Option<Uuid>,
+    pub utm_source: Option<String>,
+    pub utm_medium: Option<String>,
+    pub utm_campaign: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub merged_into_lead_id: Option<Uuid>,
 }
@@ -131,12 +137,14 @@ impl LeadRepository {
             sqlx::query(
                 r#"INSERT INTO lead.leads
                      (id, company_id, lead_name, organization_name, phone, whatsapp_no, email,
-                      source, campaign_id, status, notes, owner_user_id, sales_team_id)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8::lead_source,$9,'new'::lead_status,$10,$11,$12)"#,
+                      source, campaign_id, status, notes, owner_user_id, sales_team_id,
+                      utm_source, utm_medium, utm_campaign)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8::lead_source,$9,'new'::lead_status,$10,$11,$12,$13,$14,$15)"#,
             )
             .bind(l.id).bind(l.company_id).bind(l.lead_name).bind(l.organization_name).bind(l.phone)
             .bind(l.whatsapp_no).bind(l.email).bind(l.source).bind(l.campaign_id).bind(l.notes)
-            .bind(l.owner_user_id).bind(l.sales_team_id),
+            .bind(l.owner_user_id).bind(l.sales_team_id)
+            .bind(l.utm_source).bind(l.utm_medium).bind(l.utm_campaign),
         )
         .await?;
         Ok(())
@@ -271,25 +279,26 @@ impl LeadRepository {
             r#"WITH k AS (
                    SELECT 'phone'::text AS key_kind, phone_key AS key_value, id, lead_name,
                           organization_name, phone, whatsapp_no, email, status::text AS status,
-                          party_id, (metadata->>'created_at')::timestamptz AS created_at
+                          party_id, utm_source, utm_medium, utm_campaign,
+                          (metadata->>'created_at')::timestamptz AS created_at
                      FROM lead.leads
                     WHERE company_id = $1 AND {live} AND phone_key IS NOT NULL
                    UNION ALL
                    SELECT 'whatsapp', whatsapp_key, id, lead_name, organization_name, phone,
-                          whatsapp_no, email, status::text, party_id,
-                          (metadata->>'created_at')::timestamptz
+                          whatsapp_no, email, status::text, party_id, utm_source, utm_medium,
+                          utm_campaign, (metadata->>'created_at')::timestamptz
                      FROM lead.leads
                     WHERE company_id = $1 AND {live} AND whatsapp_key IS NOT NULL
                    UNION ALL
                    SELECT 'email', email_key, id, lead_name, organization_name, phone,
-                          whatsapp_no, email, status::text, party_id,
-                          (metadata->>'created_at')::timestamptz
+                          whatsapp_no, email, status::text, party_id, utm_source, utm_medium,
+                          utm_campaign, (metadata->>'created_at')::timestamptz
                      FROM lead.leads
                     WHERE company_id = $1 AND {live} AND email_key IS NOT NULL
                    UNION ALL
                    SELECT 'org', org_key, id, lead_name, organization_name, phone,
-                          whatsapp_no, email, status::text, party_id,
-                          (metadata->>'created_at')::timestamptz
+                          whatsapp_no, email, status::text, party_id, utm_source, utm_medium,
+                          utm_campaign, (metadata->>'created_at')::timestamptz
                      FROM lead.leads
                     WHERE company_id = $1 AND {live} AND org_key IS NOT NULL
                ),
@@ -303,7 +312,9 @@ impl LeadRepository {
                       jsonb_agg(jsonb_build_object(
                           'id', k.id, 'leadName', k.lead_name, 'organizationName', k.organization_name,
                           'phone', k.phone, 'whatsappNo', k.whatsapp_no, 'email', k.email,
-                          'status', k.status, 'partyId', k.party_id, 'createdAt', k.created_at
+                          'status', k.status, 'partyId', k.party_id, 'createdAt', k.created_at,
+                          'utmSource', k.utm_source, 'utmMedium', k.utm_medium,
+                          'utmCampaign', k.utm_campaign
                       ) ORDER BY k.id) AS members
                  FROM g JOIN k USING (key_kind, key_value)
                 GROUP BY g.key_kind, g.key_value, g.member_count
@@ -344,6 +355,7 @@ impl LeadRepository {
         let rows = sqlx::query(
             r#"SELECT id, lead_name, organization_name, phone, whatsapp_no, email, notes,
                       status::text AS status, party_id, campaign_id, owner_user_id, sales_team_id,
+                      utm_source, utm_medium, utm_campaign,
                       (metadata->>'created_at')::timestamptz AS created_at, merged_into_lead_id
                  FROM lead.leads
                 WHERE id = ANY($1) AND (metadata->>'deleted_at') IS NULL
@@ -368,6 +380,9 @@ impl LeadRepository {
                 campaign_id: r.get("campaign_id"),
                 owner_user_id: r.get("owner_user_id"),
                 sales_team_id: r.get("sales_team_id"),
+                utm_source: r.get("utm_source"),
+                utm_medium: r.get("utm_medium"),
+                utm_campaign: r.get("utm_campaign"),
                 created_at: r.get("created_at"),
                 merged_into_lead_id: r.get("merged_into_lead_id"),
             })
@@ -379,6 +394,7 @@ impl LeadRepository {
     /// service picked from the dupes in confidence order).
     ///
     /// Takes the CALLER'S transaction; the row is already locked by `fetch_for_merge`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn fill_master_fields(
         &self,
         conn: &mut sqlx::PgConnection,
@@ -391,11 +407,15 @@ impl LeadRepository {
         campaign_id: Option<Uuid>,
         owner_user_id: Option<Uuid>,
         sales_team_id: Option<Uuid>,
+        utm_source: Option<&str>,
+        utm_medium: Option<&str>,
+        utm_campaign: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"UPDATE lead.leads
                   SET organization_name = $2, phone = $3, whatsapp_no = $4, email = $5,
-                      notes = $6, campaign_id = $7, owner_user_id = $8, sales_team_id = $9
+                      notes = $6, campaign_id = $7, owner_user_id = $8, sales_team_id = $9,
+                      utm_source = $10, utm_medium = $11, utm_campaign = $12
                 WHERE id = $1"#,
         )
         .bind(master_id)
@@ -407,6 +427,9 @@ impl LeadRepository {
         .bind(campaign_id)
         .bind(owner_user_id)
         .bind(sales_team_id)
+        .bind(utm_source)
+        .bind(utm_medium)
+        .bind(utm_campaign)
         .execute(conn)
         .await?;
         Ok(())

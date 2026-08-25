@@ -21,6 +21,9 @@ pub fn lead_validator() -> LeadValidator {
         .rule(OptionalNotBlank::new("whatsapp_no", |e: &Lead| e.whatsapp_no.as_deref()))
         .rule(OptionalNotBlank::new("email", |e: &Lead| e.email.as_deref()))
         .rule(OptionalNotBlank::new("notes", |e: &Lead| e.notes.as_deref()))
+        .rule(OptionalNotBlank::new("utm_source", |e: &Lead| e.utm_source.as_deref()))
+        .rule(OptionalNotBlank::new("utm_medium", |e: &Lead| e.utm_medium.as_deref()))
+        .rule(OptionalNotBlank::new("utm_campaign", |e: &Lead| e.utm_campaign.as_deref()))
     // <<< CUSTOM RULES
     // END CUSTOM RULES
 }

@@ -65,6 +65,9 @@ pub struct Lead {
     pub notes: Option<String>,
     pub owner_user_id: Option<Uuid>,
     pub sales_team_id: Option<Uuid>,
+    pub utm_source: Option<String>,
+    pub utm_medium: Option<String>,
+    pub utm_campaign: Option<String>,
     pub merged_into_lead_id: Option<Uuid>,
     pub merged_at: Option<DateTime<Utc>>,
     #[serde(default)]
@@ -96,6 +99,9 @@ impl Lead {
             notes: None,
             owner_user_id: None,
             sales_team_id: None,
+            utm_source: None,
+            utm_medium: None,
+            utm_campaign: None,
             merged_into_lead_id: None,
             merged_at: None,
             metadata: AuditMetadata::default(),
@@ -222,6 +228,24 @@ impl Lead {
         self
     }
 
+    /// Set the utm_source field (chainable)
+    pub fn with_utm_source(mut self, value: String) -> Self {
+        self.utm_source = Some(value);
+        self
+    }
+
+    /// Set the utm_medium field (chainable)
+    pub fn with_utm_medium(mut self, value: String) -> Self {
+        self.utm_medium = Some(value);
+        self
+    }
+
+    /// Set the utm_campaign field (chainable)
+    pub fn with_utm_campaign(mut self, value: String) -> Self {
+        self.utm_campaign = Some(value);
+        self
+    }
+
     /// Set the merged_into_lead_id field (chainable)
     pub fn with_merged_into_lead_id(mut self, value: Uuid) -> Self {
         self.merged_into_lead_id = Some(value);
@@ -283,6 +307,15 @@ impl Lead {
                 }
                 "sales_team_id" => {
                     if let Ok(v) = serde_json::from_value(value) { self.sales_team_id = v; }
+                }
+                "utm_source" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.utm_source = v; }
+                }
+                "utm_medium" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.utm_medium = v; }
+                }
+                "utm_campaign" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.utm_campaign = v; }
                 }
                 "merged_into_lead_id" => {
                     if let Ok(v) = serde_json::from_value(value) { self.merged_into_lead_id = v; }
@@ -382,6 +415,9 @@ pub struct LeadBuilder {
     notes: Option<String>,
     owner_user_id: Option<Uuid>,
     sales_team_id: Option<Uuid>,
+    utm_source: Option<String>,
+    utm_medium: Option<String>,
+    utm_campaign: Option<String>,
     merged_into_lead_id: Option<Uuid>,
     merged_at: Option<DateTime<Utc>>,
 }
@@ -471,6 +507,24 @@ impl LeadBuilder {
         self
     }
 
+    /// Set the utm_source field (optional)
+    pub fn utm_source(mut self, value: String) -> Self {
+        self.utm_source = Some(value);
+        self
+    }
+
+    /// Set the utm_medium field (optional)
+    pub fn utm_medium(mut self, value: String) -> Self {
+        self.utm_medium = Some(value);
+        self
+    }
+
+    /// Set the utm_campaign field (optional)
+    pub fn utm_campaign(mut self, value: String) -> Self {
+        self.utm_campaign = Some(value);
+        self
+    }
+
     /// Set the merged_into_lead_id field (optional)
     pub fn merged_into_lead_id(mut self, value: Uuid) -> Self {
         self.merged_into_lead_id = Some(value);
@@ -506,6 +560,9 @@ impl LeadBuilder {
             notes: self.notes,
             owner_user_id: self.owner_user_id,
             sales_team_id: self.sales_team_id,
+            utm_source: self.utm_source,
+            utm_medium: self.utm_medium,
+            utm_campaign: self.utm_campaign,
             merged_into_lead_id: self.merged_into_lead_id,
             merged_at: self.merged_at,
             metadata: AuditMetadata::default(),

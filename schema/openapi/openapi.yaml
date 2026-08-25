@@ -446,6 +446,18 @@ components:
           nullable: true
           type: string
           format: uuid
+        utm_source:
+          nullable: true
+          type: string
+          maxLength: 255
+        utm_medium:
+          nullable: true
+          type: string
+          maxLength: 255
+        utm_campaign:
+          nullable: true
+          type: string
+          maxLength: 255
         merged_into_lead_id:
           nullable: true
           type: string
@@ -529,6 +541,18 @@ components:
           nullable: true
           type: string
           format: uuid
+        utm_source:
+          nullable: true
+          type: string
+          maxLength: 255
+        utm_medium:
+          nullable: true
+          type: string
+          maxLength: 255
+        utm_campaign:
+          nullable: true
+          type: string
+          maxLength: 255
         merged_into_lead_id:
           nullable: true
           type: string
@@ -599,6 +623,18 @@ components:
           nullable: true
           type: string
           format: uuid
+        utm_source:
+          nullable: true
+          type: string
+          maxLength: 255
+        utm_medium:
+          nullable: true
+          type: string
+          maxLength: 255
+        utm_campaign:
+          nullable: true
+          type: string
+          maxLength: 255
         merged_into_lead_id:
           nullable: true
           type: string
@@ -663,6 +699,18 @@ components:
           nullable: true
           type: string
           format: uuid
+        utm_source:
+          nullable: true
+          type: string
+          maxLength: 255
+        utm_medium:
+          nullable: true
+          type: string
+          maxLength: 255
+        utm_campaign:
+          nullable: true
+          type: string
+          maxLength: 255
         merged_into_lead_id:
           nullable: true
           type: string

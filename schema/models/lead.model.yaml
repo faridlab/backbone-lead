@@ -18,10 +18,11 @@
 # absorbed leads are excluded from duplicate candidate scans and can never be a
 # master or a dupe again. Merge field-fill rule: the MASTER's non-null values
 # win; each nullable lead-owned field (organization_name, phone, whatsapp_no,
-# email, notes, campaign_id, owner_user_id, sales_team_id) fills from the first
-# non-null value walking the dupes in confidence order (status precedence →
-# party anchor → newest created_at → smallest id). party_id / converted_at are
-# never filled — conversion is once per lead. Normalized match keys
+# email, notes, campaign_id, owner_user_id, sales_team_id, utm_source,
+# utm_medium, utm_campaign) fills from the first non-null value walking the
+# dupes in confidence order (status precedence → party anchor → newest
+# created_at → smallest id). party_id / converted_at are never filled —
+# conversion is once per lead. Normalized match keys
 # (phone_key / whatsapp_key / email_key / org_key) are DB-level generated
 # columns declared in the reshape migration, not here — they are indexing
 # detail, same tier as RLS policies and audit triggers.
@@ -96,6 +97,19 @@ models:
         type: uuid?
         attributes: ["@exclude_from_foreign_key_check"]
         description: "Assigned sales team # logical FK to selling.SalesTeam.id (cross-module, no cargo edge). Stored only — team-resolution defaults are host-side."
+      # --- UTM attribution (wave DoD: carried from capture to won roll-up) ---
+      utm_source:
+        type: string?
+        attributes: ["@max(255)"]
+        description: "UTM source parameter (e.g. google, facebook, newsletter)"
+      utm_medium:
+        type: string?
+        attributes: ["@max(255)"]
+        description: "UTM medium parameter (e.g. cpc, banner, email)"
+      utm_campaign:
+        type: string?
+        attributes: ["@max(255)"]
+        description: "UTM campaign parameter (e.g. spring_sale, promo_launch)"
       # --- dedup/merge (soft-absorb; dupes are never deleted) ---
       merged_into_lead_id:
         type: uuid?

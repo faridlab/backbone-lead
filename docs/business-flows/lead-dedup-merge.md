@@ -46,7 +46,9 @@ field-fill order):**
 
 **Master-wins field fill:** the master's non-null values always win; each null lead-owned field
 (`organizationName`, `phone`, `whatsappNo`, `email`, `notes`, `campaignId`, `ownerUserId`,
-`salesTeamId`) fills from the first non-null dupe in confidence order; the names of filled
+`salesTeamId`, `utmSource`, `utmMedium`, `utmCampaign`) fills from the first non-null dupe in
+confidence order — attribution survives a merge, so the won roll-up still knows where the lead
+came from; the names of filled
 fields are reported in `fieldsFilled`. `party_id` and `converted_at` are **never** filled —
 conversion is once per lead.
 

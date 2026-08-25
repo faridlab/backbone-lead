@@ -20,8 +20,14 @@ use backbone_orm::company_scope;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::domain::entity::LeadSource;
 use crate::domain::event::{LeadEventSink, LoggingLeadSink};
 use crate::infrastructure::persistence::{LeadRepository, NewLeadRow};
+
+/// The accepted `source` values, spelled once for the typed 422 message. The HTTP regression
+/// probe asserts the message names every variant, so an enum change without a message change
+/// fails the suite instead of shipping a stale vocabulary.
+pub const LEAD_SOURCE_VOCABULARY: &str = "whatsapp, instagram, referral, website, walk_in, other";
 
 #[derive(Debug, thiserror::Error)]
 pub enum LeadError {
@@ -81,6 +87,10 @@ pub struct NewLead {
     pub owner_user_id: Option<Uuid>,
     /// Assigned sales team — STORED only, same host-side policy rule as the owner.
     pub sales_team_id: Option<Uuid>,
+    /// UTM attribution captured with the lead (source/medium/campaign of the inbound link).
+    pub utm_source: Option<String>,
+    pub utm_medium: Option<String>,
+    pub utm_campaign: Option<String>,
 }
 
 pub struct LeadWriteService {
@@ -106,6 +116,15 @@ impl LeadWriteService {
         if l.whatsapp_no.is_none() && l.phone.is_none() && l.email.is_none() {
             return Err(LeadError::Invalid("a lead needs at least one contact channel".into()));
         }
+        // The source arrives as a free string (the capture surface deliberately answers the
+        // module's typed 422 rather than the extractor's rejection), so THIS is where the
+        // vocabulary is enforced: parse before the insert, or an unknown value would surface
+        // as a DB enum-cast failure — a 500, not a caller error.
+        if let Err(bad) = l.source.parse::<LeadSource>() {
+            return Err(LeadError::Invalid(format!(
+                "source '{bad}' is not a known lead source; must be one of: {LEAD_SOURCE_VOCABULARY}"
+            )));
+        }
         // RLS scope (ADR-0008): company on the DTO — bind it for the body so the insert passes the
         // WITH CHECK fence. The explicit `company_id` bind stays as defense-in-depth.
         let company = l.company_id;
@@ -125,6 +144,9 @@ impl LeadWriteService {
                     notes: l.notes.as_deref(),
                     owner_user_id: l.owner_user_id,
                     sales_team_id: l.sales_team_id,
+                    utm_source: l.utm_source.as_deref(),
+                    utm_medium: l.utm_medium.as_deref(),
+                    utm_campaign: l.utm_campaign.as_deref(),
                 })
                 .await?;
             Ok(id)

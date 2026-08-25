@@ -37,9 +37,40 @@ async fn capture(svc: &LeadWriteService, company: Uuid, name: &str, phone: Optio
         notes: None,
         owner_user_id: None,
         sales_team_id: None,
+        utm_source: None,
+        utm_medium: None,
+        utm_campaign: None,
     })
     .await
     .expect("capture lead")
+}
+
+/// Capture a lead carrying UTM attribution, through the real write path.
+async fn capture_with_utm(
+    svc: &LeadWriteService,
+    company: Uuid,
+    name: &str,
+    phone: &str,
+    utm: Option<(&str, &str, &str)>,
+) -> Uuid {
+    svc.create_lead(NewLead {
+        company_id: company,
+        lead_name: name.into(),
+        organization_name: None,
+        phone: Some(phone.into()),
+        whatsapp_no: None,
+        email: None,
+        source: "website".into(),
+        campaign_id: None,
+        notes: None,
+        owner_user_id: None,
+        sales_team_id: None,
+        utm_source: utm.map(|u| u.0.into()),
+        utm_medium: utm.map(|u| u.1.into()),
+        utm_campaign: utm.map(|u| u.2.into()),
+    })
+    .await
+    .expect("capture attributed lead")
 }
 
 async fn set_status(pool: &PgPool, id: Uuid, status: &str) {
@@ -619,4 +650,53 @@ async fn rls_fence_over_the_merge_columns() {
     tx.commit().await.unwrap();
 
     sqlx::query("RESET ROLE").execute(&mut *conn).await.unwrap();
+}
+
+// ── MA: merge carries attribution ─────────────────────────────────────────────
+
+/// MA-1: an un-attributed master inherits the dupe's UTM trio (attribution must survive the
+/// merge, so the won roll-up still knows where the lead came from); MA-2: a master with its
+/// own attribution keeps it — the master's non-null values win for the utm trio exactly as
+/// for every other nullable lead-owned field.
+#[tokio::test]
+async fn merge_carries_attribution() {
+    let pool = pool().await;
+    let svc = LeadWriteService::new(pool.clone());
+    let company = Uuid::new_v4();
+
+    // MA-1: bare master + attributed dupe.
+    let master = capture(&svc, company, "Lina", Some("+62 823-1"), None, None).await;
+    let dupe = capture_with_utm(&svc, company, "Lina dupe", "0823-1", Some(("google", "cpc", "spring_sale"))).await;
+    let outcome = svc.merge_leads(company, Some(master), vec![dupe]).await.unwrap();
+    let row = sqlx::query(
+        r#"SELECT utm_source, utm_medium, utm_campaign FROM lead.leads WHERE id=$1"#,
+    )
+    .bind(master)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let s = |c: &str| row.try_get::<Option<String>, _>(c).unwrap();
+    assert_eq!(s("utm_source").as_deref(), Some("google"), "master inherits the dupe's utm_source");
+    assert_eq!(s("utm_medium").as_deref(), Some("cpc"), "master inherits the dupe's utm_medium");
+    assert_eq!(s("utm_campaign").as_deref(), Some("spring_sale"), "master inherits the dupe's utm_campaign");
+    for name in ["utmSource", "utmMedium", "utmCampaign"] {
+        assert!(outcome.fields_filled.contains(&name), "fields_filled names {name}: {:?}", outcome.fields_filled);
+    }
+
+    // MA-2: attributed master + differently-attributed dupe — the master's own values win.
+    let m2 = capture_with_utm(&svc, company, "Mira", "+62 824-1", Some(("newsletter", "email", "july_launch"))).await;
+    let d2 = capture_with_utm(&svc, company, "Mira dupe", "0824-1", Some(("google", "cpc", "spring_sale"))).await;
+    let outcome2 = svc.merge_leads(company, Some(m2), vec![d2]).await.unwrap();
+    let row2 = sqlx::query(
+        r#"SELECT utm_source, utm_medium, utm_campaign FROM lead.leads WHERE id=$1"#,
+    )
+    .bind(m2)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let s2 = |c: &str| row2.try_get::<Option<String>, _>(c).unwrap();
+    assert_eq!(s2("utm_source").as_deref(), Some("newsletter"), "master's own utm_source kept");
+    assert_eq!(s2("utm_medium").as_deref(), Some("email"), "master's own utm_medium kept");
+    assert_eq!(s2("utm_campaign").as_deref(), Some("july_launch"), "master's own utm_campaign kept");
+    assert!(!outcome2.fields_filled.iter().any(|f| f.starts_with("utm")), "no utm fill reported: {:?}", outcome2.fields_filled);
 }

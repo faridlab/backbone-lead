@@ -38,6 +38,8 @@ schema (scratch database; see each file header for the harness).
 **MG-4 field fill (master-wins):** master's non-null `notes` / `campaignId` / `ownerUserId` /
 `salesTeamId` kept; null `organizationName` / `phone` / `email` filled from the dupe;
 `fieldsFilled` names exactly the filled fields; `party_id` / `converted_at` never filled.
+Attribution rides the same rule (MA section): a null UTM trio fills from the first attributed
+dupe, a master's own UTM values win.
 Unit-golden: `fill_or_keep_prefers_master_then_first_dupe`.
 
 ## IDM — idempotence

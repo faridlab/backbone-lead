@@ -54,6 +54,9 @@ pub struct GroupMember {
     pub email: Option<String>,
     pub status: String,
     pub party_id: Option<Uuid>,
+    pub utm_source: Option<String>,
+    pub utm_medium: Option<String>,
+    pub utm_campaign: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -362,6 +365,14 @@ impl LeadWriteService {
         if f { fields_filled.push("ownerUserId"); }
         let (sales_team_id, f) = fill_or_keep(&master_row.sales_team_id, &absorb_live, |r| r.sales_team_id);
         if f { fields_filled.push("salesTeamId"); }
+        // Attribution rides the same rule: the master's own campaign attribution wins; an
+        // un-attributed master inherits from the first attributed dupe in confidence order.
+        let (utm_source, f) = fill_or_keep(&master_row.utm_source, &absorb_live, |r| r.utm_source.clone());
+        if f { fields_filled.push("utmSource"); }
+        let (utm_medium, f) = fill_or_keep(&master_row.utm_medium, &absorb_live, |r| r.utm_medium.clone());
+        if f { fields_filled.push("utmMedium"); }
+        let (utm_campaign, f) = fill_or_keep(&master_row.utm_campaign, &absorb_live, |r| r.utm_campaign.clone());
+        if f { fields_filled.push("utmCampaign"); }
 
         // Mutation: one fill for the master, one CAS absorb per live dupe — all-or-nothing.
         if !absorb_live.is_empty() {
@@ -377,6 +388,9 @@ impl LeadWriteService {
                     campaign_id,
                     owner_user_id,
                     sales_team_id,
+                    utm_source.as_deref(),
+                    utm_medium.as_deref(),
+                    utm_campaign.as_deref(),
                 )
                 .await?;
             for dupe in &absorb_live {
@@ -512,6 +526,9 @@ mod tests {
             campaign_id: None,
             owner_user_id: None,
             sales_team_id: None,
+            utm_source: None,
+            utm_medium: None,
+            utm_campaign: None,
             created_at: None,
             merged_into_lead_id: None,
         };

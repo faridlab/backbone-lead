@@ -42,6 +42,12 @@ user_owned:
   # create-table migrations for NEW entities; reshapes are hand-authored).
   - "migrations/20260824120000_lead_dedup_merge.up.sql"
   - "migrations/20260824120000_lead_dedup_merge.down.sql"
+  - "migrations/20260825120000_lead_utm_attribution.up.sql"
+  - "migrations/20260825120000_lead_utm_attribution.down.sql"
+
+  # HTTP-surface tests for the guarded capture verb and its read surfaces (the invalid-source
+  # typed-422 regression probe, source round-trip, UTM capture-to-read surfacing).
+  - "tests/lead_capture_routes_test.rs"
 
   # Hand-authored module documentation.
   - "docs/**"

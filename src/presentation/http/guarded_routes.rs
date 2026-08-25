@@ -87,6 +87,13 @@ struct CaptureLeadBody {
     owner_user_id: Option<Uuid>,
     #[serde(default)]
     sales_team_id: Option<Uuid>,
+    // UTM attribution of the inbound link, carried from capture through to the roll-up reads.
+    #[serde(default)]
+    utm_source: Option<String>,
+    #[serde(default)]
+    utm_medium: Option<String>,
+    #[serde(default)]
+    utm_campaign: Option<String>,
 }
 async fn capture_lead(
     State(svc): State<Arc<LeadWriteService>>,
@@ -100,11 +107,17 @@ async fn capture_lead(
         phone: b.phone,
         whatsapp_no: b.whatsapp_no,
         email: b.email,
+        // Deliberately a free string here (so an unknown value answers the module's typed 422
+        // below, not the extractor's rejection); the write service parses it against the
+        // LeadSource vocabulary before any DB bind.
         source: b.source.unwrap_or_else(|| "whatsapp".into()),
         campaign_id: b.campaign_id,
         notes: b.notes,
         owner_user_id: b.owner_user_id,
         sales_team_id: b.sales_team_id,
+        utm_source: b.utm_source,
+        utm_medium: b.utm_medium,
+        utm_campaign: b.utm_campaign,
     };
     match svc.create_lead(lead).await {
         Ok(id) => (StatusCode::CREATED, Json(IdResponse { id })).into_response(),
