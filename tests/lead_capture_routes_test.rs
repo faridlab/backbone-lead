@@ -95,11 +95,12 @@ async fn send(router: axum::Router, r: Request<Body>) -> (StatusCode, Value) {
 }
 
 /// The full LeadSource vocabulary, spelled once — the probe asserts the 422 message against it.
-const LEAD_SOURCE_VARIANTS: [&str; 6] = [
+const LEAD_SOURCE_VARIANTS: [&str; 7] = [
     "whatsapp",
     "instagram",
     "referral",
     "website",
+    "livechat",
     "walk_in",
     "other",
 ];
@@ -210,6 +211,29 @@ async fn c2_source_stored_as_sent_and_defaults_when_omitted() {
             .await
             .unwrap();
     assert_eq!(default_stored, "whatsapp");
+
+    // The livechat attribution source (the CRM-bridge mint) round-trips too:
+    // the enum value, the FromStr arm, and the DB enum must all accept it, or
+    // every lead minted from a chat conversation dies at the capture verb.
+    let (status, body) = send(
+        router.clone(),
+        req(
+            "POST",
+            "/leads",
+            Some(json!({ "leadName": "C2 livechat", "phone": "+62 811-000-0005", "source": "livechat" })),
+            Some(bearer),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let livechat: Uuid = serde_json::from_value(body["id"].clone()).unwrap();
+    let livechat_stored: String =
+        sqlx::query_scalar("SELECT source::text FROM lead.leads WHERE id=$1")
+            .bind(livechat)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(livechat_stored, "livechat");
 }
 
 // ── C-3: UTM rides capture and surfaces on the read surface ───────────────────

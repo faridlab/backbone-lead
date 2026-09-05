@@ -63,3 +63,4 @@ shared_types:
 
 imports:
   - lead.model.yaml
+  - lead_website_visitor.model.yaml

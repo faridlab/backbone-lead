@@ -27,7 +27,8 @@ use crate::infrastructure::persistence::{LeadRepository, NewLeadRow};
 /// The accepted `source` values, spelled once for the typed 422 message. The HTTP regression
 /// probe asserts the message names every variant, so an enum change without a message change
 /// fails the suite instead of shipping a stale vocabulary.
-pub const LEAD_SOURCE_VOCABULARY: &str = "whatsapp, instagram, referral, website, walk_in, other";
+pub const LEAD_SOURCE_VOCABULARY: &str =
+    "whatsapp, instagram, referral, website, livechat, walk_in, other";
 
 #[derive(Debug, thiserror::Error)]
 pub enum LeadError {

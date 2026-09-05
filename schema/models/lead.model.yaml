@@ -151,6 +151,8 @@ enums:
         description: "Referral / word of mouth"
       - name: website
         description: "Website form"
+      - name: livechat
+        description: "Live chat conversation minted to a lead (the CRM bridge)"
       - name: walk_in
         description: "Walk-in / offline"
       - name: other

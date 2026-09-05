@@ -1,0 +1,73 @@
+# =============================================================================
+# Module: backbone-lead
+# Entity: LeadWebsiteVisitor
+# Description: the crm-lead ↔ website-visitor attribution spine.
+#
+# A lead captured from a website form keeps a durable attribution link to the
+# website visitor row whose session submitted it. The link lives HERE, on the
+# lead (consumer) side, following the cross-module promotion contract: the
+# website visitor id and website id are stored as PLAIN UUIDs with no DB
+# foreign key — backbone-website cannot gain a lead-shaped edge, and the
+# website visitor lifecycle (the 60-day partnerless GC sweep and the erasure
+# verb, both website-owned) stays free to reclaim visitor rows while this
+# table keeps the attribution. Reads over the visitor side therefore tolerate
+# dangling ids by design (LEFT JOIN semantics; the lead row is the record of
+# truth, never the visitor row).
+#
+# PII posture (deliberate): NO lead contact field is ever copied onto a
+# website-visible row through this link. The lead's email/phone stay in
+# lead.leads behind the company fence; the visitor row remains the
+# digest-only analytics grain backbone-website defines. Consequence for
+# downstream consumers: any per-visitor messaging surface must target the
+# LEAD's own contact columns — there is no visitor-held email/mobile to
+# compare against.
+#
+# lead_id is the one real (same-schema) foreign key: links die with their
+# lead on hard delete. The unique (lead_id, website_visitor_id) pair makes
+# re-linking idempotent — the same visitor re-submitting the same lead path
+# never mints duplicate rows.
+# =============================================================================
+
+models:
+  - name: LeadWebsiteVisitor
+    collection: lead_website_visitors
+    description: "Attribution link between a captured lead and the website visitor session that submitted it (lead-side M2M; plain uuids to website, no DB FK)"
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique link id"
+      company_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Org owner # logical FK to organization.Company.id (the company fence — same posture as lead.leads)"
+      lead_id:
+        type: uuid
+        attributes: ["@required", "@indexed", "@foreign_key(Lead.leads)"]
+        description: "The captured lead # real same-schema FK to lead.leads"
+      website_id:
+        type: uuid
+        attributes: ["@required", "@indexed", "@exclude_from_foreign_key_check"]
+        description: "The website the visitor row belongs to # logical FK to website.websites (cross-module, plain uuid by the promotion contract)"
+      website_visitor_id:
+        type: uuid
+        attributes: ["@required", "@indexed", "@exclude_from_foreign_key_check"]
+        description: "The website visitor row # logical FK to website.visitors (cross-module, NO DB FK — the visitor row is reclaimable by website's GC/erasure; dangling ids are the accepted posture)"
+      linked_at:
+        type: datetime
+        attributes: ["@default(now)"]
+        description: "When the attribution was recorded"
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata"
+    indexes:
+      - type: unique
+        fields: [lead_id, website_visitor_id]
+        description: "Idempotent re-link (the same visitor re-submitting never mints a second row)"
+      - type: index
+        fields: [website_id, website_visitor_id]
+        description: "The reverse read: every lead a visitor produced (visitor-side analytics)"
+      - type: index
+        fields: [company_id]
+        description: "The company fence's own scan path"

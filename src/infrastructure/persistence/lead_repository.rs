@@ -99,6 +99,15 @@ pub struct DuplicateKeyGroupRow {
     pub members: serde_json::Value,
 }
 
+/// The lead INSERT text, shared by the pool-backed capture verb and the
+/// connection-taking website-capture leg (one text, no drift — a column
+/// added here without the bind sites fails to compile).
+pub(crate) const LEAD_INSERT_SQL: &str = r#"INSERT INTO lead.leads
+     (id, company_id, lead_name, organization_name, phone, whatsapp_no, email,
+      source, campaign_id, status, notes, owner_user_id, sales_team_id,
+      utm_source, utm_medium, utm_campaign)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8::lead_source,$9,'new'::lead_status,$10,$11,$12,$13,$14,$15)"#;
+
 /// The merge-decision projection for one lead: every field the confidence order, the field-fill rule,
 /// and the absorb classification read. `status` is free text (cast at the DB) so an unexpected value
 /// fails classification loudly instead of deserializing into a panic.
@@ -134,13 +143,7 @@ impl LeadRepository {
     pub async fn insert_lead(&self, pool: &PgPool, l: &NewLeadRow<'_>) -> Result<(), sqlx::Error> {
         company_scope::execute_scoped(
             pool,
-            sqlx::query(
-                r#"INSERT INTO lead.leads
-                     (id, company_id, lead_name, organization_name, phone, whatsapp_no, email,
-                      source, campaign_id, status, notes, owner_user_id, sales_team_id,
-                      utm_source, utm_medium, utm_campaign)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8::lead_source,$9,'new'::lead_status,$10,$11,$12,$13,$14,$15)"#,
-            )
+            sqlx::query(LEAD_INSERT_SQL)
             .bind(l.id).bind(l.company_id).bind(l.lead_name).bind(l.organization_name).bind(l.phone)
             .bind(l.whatsapp_no).bind(l.email).bind(l.source).bind(l.campaign_id).bind(l.notes)
             .bind(l.owner_user_id).bind(l.sales_team_id)

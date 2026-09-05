@@ -13,6 +13,7 @@ pub enum LeadSource {
     Instagram,
     Referral,
     Website,
+    Livechat,
     WalkIn,
     Other,
 }
@@ -24,6 +25,7 @@ impl std::fmt::Display for LeadSource {
             Self::Instagram => write!(f, "instagram"),
             Self::Referral => write!(f, "referral"),
             Self::Website => write!(f, "website"),
+            Self::Livechat => write!(f, "livechat"),
             Self::WalkIn => write!(f, "walk_in"),
             Self::Other => write!(f, "other"),
         }
@@ -39,6 +41,7 @@ impl FromStr for LeadSource {
             "instagram" => Ok(Self::Instagram),
             "referral" => Ok(Self::Referral),
             "website" => Ok(Self::Website),
+            "livechat" => Ok(Self::Livechat),
             "walk_in" => Ok(Self::WalkIn),
             "other" => Ok(Self::Other),
             _ => Err(format!("Unknown LeadSource variant: {}", s)),

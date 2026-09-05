@@ -37,6 +37,7 @@ user_owned:
   - "tests/features/**"
   - "tests/lead_merge_cases.rs"
   - "tests/lead_merge_routes_test.rs"
+  - "tests/website_capture_cases.rs"
 
   # Hand-written reshape migration for a published table (the generator only emits
   # create-table migrations for NEW entities; reshapes are hand-authored).
@@ -44,6 +45,32 @@ user_owned:
   - "migrations/20260824120000_lead_dedup_merge.down.sql"
   - "migrations/20260825120000_lead_utm_attribution.up.sql"
   - "migrations/20260825120000_lead_utm_attribution.down.sql"
+
+  # The lead ↔ website-visitor attribution spine: the hand-authored create-table
+  # migration (additive, mirrors the generated DDL family) and the connection-taking
+  # capture leg (insert / strict match / link) shared with the website intake engine.
+  - "migrations/20260906120000_lead_website_visitor_spine.up.sql"
+  - "migrations/20260906120000_lead_website_visitor_spine.down.sql"
+  - "src/infrastructure/persistence/lead_website_visitor_repository.rs"
+
+  # Hand-authored reshape: the livechat attribution source on the lead_source enum
+  # (the generator only emits create-table migrations for NEW enums; enum-value
+  # additions are hand-authored ALTER TYPE ADD VALUE). Down is a documented no-op —
+  # PostgreSQL cannot drop enum values.
+  - "migrations/20260906130000_lead_source_livechat.up.sql"
+  - "migrations/20260906130000_lead_source_livechat.down.sql"
+
+  # ⚠ GENERATOR-DRIFT FREEZE (whole tree, pinned generator only): running
+  # `metaphor schema generate --force` with the pinned CLI rewrote 209 files of
+  # the livechat module (-3.7k lines against its checked-in generated state) —
+  # the pinned generator's templates no longer match the trees it once produced.
+  # Until the generator is reconciled, schema-derived enum/entity files carrying
+  # hand-merged variants are frozen here instead of regenerated. This file is
+  # the LeadSource enum: it carries the hand-merged `livechat` variant (enum,
+  # Display, FromStr) matching schema/models/lead.model.yaml. Unlist ONLY after
+  # the generator reproduces the checked-in trees byte-for-byte; until then any
+  # further enum change must be hand-merged the same way.
+  - "src/domain/entity/lead_source.rs"
 
   # HTTP-surface tests for the guarded capture verb and its read surfaces (the invalid-source
   # typed-422 regression probe, source round-trip, UTM capture-to-read surfacing).
