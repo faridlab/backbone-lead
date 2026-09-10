@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use backbone_orm::company_scope;
+use backbone_orm::org_scope;
 
 use crate::domain::entity::Lead;
 
@@ -50,7 +50,6 @@ impl LeadRepository {
 /// panic.
 pub struct NewLeadRow<'a> {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub lead_name: &'a str,
     pub organization_name: Option<&'a str>,
     pub phone: Option<&'a str>,
@@ -66,10 +65,9 @@ pub struct NewLeadRow<'a> {
     pub utm_campaign: Option<&'a str>,
 }
 
-/// The qualification pre-flight projection: the company to bind, the live status, the party the
+/// The qualification pre-flight projection: the live status, the party the
 /// opportunity inherits, and the campaign it snapshots for attribution.
 pub struct LeadForQualifyRow {
-    pub company_id: Uuid,
     pub status: String,
     pub party_id: Option<Uuid>,
     pub campaign_id: Option<Uuid>,
@@ -78,7 +76,6 @@ pub struct LeadForQualifyRow {
 /// The conversion pre-flight projection: the identity fields the party ACL mints a Customer from, plus
 /// the once-only gate (`party_id`).
 pub struct LeadForConvertRow {
-    pub company_id: Uuid,
     pub lead_name: String,
     pub organization_name: Option<String>,
     pub phone: Option<String>,
@@ -103,10 +100,10 @@ pub struct DuplicateKeyGroupRow {
 /// connection-taking website-capture leg (one text, no drift — a column
 /// added here without the bind sites fails to compile).
 pub(crate) const LEAD_INSERT_SQL: &str = r#"INSERT INTO lead.leads
-     (id, company_id, lead_name, organization_name, phone, whatsapp_no, email,
+     (id, lead_name, organization_name, phone, whatsapp_no, email,
       source, campaign_id, status, notes, owner_user_id, sales_team_id,
       utm_source, utm_medium, utm_campaign)
-   VALUES ($1,$2,$3,$4,$5,$6,$7,$8::lead_source,$9,'new'::lead_status,$10,$11,$12,$13,$14,$15)"#;
+   VALUES ($1,$2,$3,$4,$5,$6,$7::lead_source,$8,'new'::lead_status,$9,$10,$11,$12,$13,$14)"#;
 
 /// The merge-decision projection for one lead: every field the confidence order, the field-fill rule,
 /// and the absorb classification read. `status` is free text (cast at the DB) so an unexpected value
@@ -136,15 +133,15 @@ pub struct LeadMatchRow {
 impl LeadRepository {
     /// Capture a lead.
     ///
-    /// A write outside any transaction: takes the pool and runs `execute_scoped` so the RLS fence
-    /// (ADR-0008) applies. The caller wraps this in `with_company_scope(Some(company))` — the company is
-    /// on the DTO, and that scope is what satisfies the INSERT's WITH CHECK fence. The explicit
-    /// `company_id` bind stays as defense-in-depth.
+    /// A write outside any transaction: takes the pool and runs `org_scope::execute_scoped`,
+    /// which rides the request-dedicated connection when the composing service bound an ambient
+    /// org scope — under a decorator-installed fence the INSERT's row-level WITH CHECK applies;
+    /// an unfenced deployment inserts plain.
     pub async fn insert_lead(&self, pool: &PgPool, l: &NewLeadRow<'_>) -> Result<(), sqlx::Error> {
-        company_scope::execute_scoped(
+        org_scope::execute_scoped(
             pool,
             sqlx::query(LEAD_INSERT_SQL)
-            .bind(l.id).bind(l.company_id).bind(l.lead_name).bind(l.organization_name).bind(l.phone)
+            .bind(l.id).bind(l.lead_name).bind(l.organization_name).bind(l.phone)
             .bind(l.whatsapp_no).bind(l.email).bind(l.source).bind(l.campaign_id).bind(l.notes)
             .bind(l.owner_user_id).bind(l.sales_team_id)
             .bind(l.utm_source).bind(l.utm_medium).bind(l.utm_campaign),
@@ -155,22 +152,20 @@ impl LeadRepository {
 
     /// Read what the qualification decision needs.
     ///
-    /// ID-only read: no company argument to scope from up front. `fetch_optional_row_scoped` rides the
-    /// REQUEST-dedicated connection (which carries the caller's `app.company_id`), so another company's
-    /// lead simply isn't found. The company on the returned row is what the caller binds onto its own
-    /// transaction.
+    /// ID-only read: no tenant argument to scope from up front. `fetch_optional_row_scoped`
+    /// rides the REQUEST-dedicated connection (which carries the ambient org scope the
+    /// composing service bound), so a lead outside the caller's scope simply isn't found.
     pub async fn find_for_qualify(&self, pool: &PgPool, lead_id: Uuid) -> Result<Option<LeadForQualifyRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
-                r#"SELECT company_id, status::text AS status, party_id, campaign_id
+                r#"SELECT status::text AS status, party_id, campaign_id
                    FROM lead.leads WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
             .bind(lead_id),
         )
         .await?;
         Ok(row.map(|r| LeadForQualifyRow {
-            company_id: r.get("company_id"),
             status: r.get("status"),
             party_id: r.get("party_id"),
             campaign_id: r.get("campaign_id"),
@@ -180,10 +175,10 @@ impl LeadRepository {
     /// Read the identity + gate the conversion decision needs. ID-only read — same fencing as
     /// `find_for_qualify`.
     pub async fn find_for_convert(&self, pool: &PgPool, lead_id: Uuid) -> Result<Option<LeadForConvertRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
-                r#"SELECT company_id, lead_name, organization_name, phone, whatsapp_no, email,
+                r#"SELECT lead_name, organization_name, phone, whatsapp_no, email,
                           status::text AS status, party_id
                    FROM lead.leads WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
@@ -191,7 +186,6 @@ impl LeadRepository {
         )
         .await?;
         Ok(row.map(|r| LeadForConvertRow {
-            company_id: r.get("company_id"),
             lead_name: r.get("lead_name"),
             organization_name: r.get("organization_name"),
             phone: r.get("phone"),
@@ -206,7 +200,7 @@ impl LeadRepository {
     /// what preserves that).
     ///
     /// Takes the CALLER'S connection so it commits with the opportunity it was qualified into. The
-    /// caller has already bound the company on that connection — don't re-bind here.
+    /// caller has already bound the org scope on that connection — don't re-bind here.
     pub async fn mark_qualified(&self, conn: &mut sqlx::PgConnection, lead_id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"UPDATE lead.leads SET status='qualified'::lead_status
@@ -226,7 +220,7 @@ impl LeadRepository {
     /// converted Customer can re-enter the pipeline as a new Lead.
     ///
     /// Takes the CALLER'S connection so the claim and the opportunity back-fill commit as one unit. The
-    /// caller has already bound the company on that connection — don't re-bind here.
+    /// caller has already bound the org scope on that connection — don't re-bind here.
     pub async fn claim_conversion(
         &self,
         conn: &mut sqlx::PgConnection,
@@ -247,19 +241,26 @@ impl LeadRepository {
 
     /// Re-read the winner's party id after a losing conversion CAS.
     ///
-    /// A read outside the (rolled-back) transaction: `fetch_one_scalar_scoped` applies the RLS fence.
-    /// The caller wraps this in `with_company_scope(Some(company_id))`.
+    /// A read outside the (rolled-back) transaction: `fetch_optional_row_scoped` applies the
+    /// composing decorator's row-level fence (rides the request-dedicated connection when an
+    /// ambient org scope is bound). A missing/out-of-scope lead answers `RowNotFound`, same as
+    /// the scalar fetch it replaces.
     pub async fn fetch_party_id(&self, pool: &PgPool, lead_id: Uuid) -> Result<Uuid, sqlx::Error> {
-        company_scope::fetch_one_scalar_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
-            sqlx::query_scalar("SELECT party_id FROM lead.leads WHERE id=$1").bind(lead_id),
+            sqlx::query("SELECT party_id FROM lead.leads WHERE id=$1").bind(lead_id),
         )
-        .await
+        .await?;
+        match row {
+            Some(r) => r.try_get("party_id"),
+            None => Err(sqlx::Error::RowNotFound),
+        }
     }
 
     // ── duplicate-candidate scan + merge (dedup/merge surface) ────────────────
 
-    /// Scan for duplicate candidates: live leads of one company grouped by a shared normalized key.
+    /// Scan for duplicate candidates: live leads within the caller's scope grouped by a shared
+    /// normalized key.
     ///
     /// One round trip: a UNION-ALL over the four key kinds (phone / whatsapp / email / org), grouped
     /// per key with HAVING count >= `min_group_size`, members aggregated as a JSON array riding the
@@ -268,12 +269,16 @@ impl LeadRepository {
     /// closure is deliberately not attempted.
     ///
     /// Live = not soft-deleted and not absorbed (`merged_into_lead_id IS NULL`), so an absorbed lead
-    /// never re-enters a candidate scan. The caller wraps this in `with_company_scope(Some(company))`;
-    /// the `company_id=$1` filter stays as defense-in-depth.
+    /// never re-enters a candidate scan.
+    ///
+    /// Tenancy (ADR-0029): no tenant argument. When the request carries an ambient org scope the
+    /// read runs inside a transaction with that scope relayed (`bind_org_scope_on`), so the
+    /// composing decorator's row-level fence applies; an unfenced deployment reads the pool plain.
+    /// (backbone_orm's org scope offers no fetch-all helper, so the scoped path is a short
+    /// read-only transaction here.)
     pub async fn find_duplicate_key_groups(
         &self,
         pool: &PgPool,
-        company_id: Uuid,
         min_group_size: i64,
         limit: i64,
     ) -> Result<Vec<DuplicateKeyGroupRow>, sqlx::Error> {
@@ -285,29 +290,29 @@ impl LeadRepository {
                           party_id, utm_source, utm_medium, utm_campaign,
                           (metadata->>'created_at')::timestamptz AS created_at
                      FROM lead.leads
-                    WHERE company_id = $1 AND {live} AND phone_key IS NOT NULL
+                    WHERE {live} AND phone_key IS NOT NULL
                    UNION ALL
                    SELECT 'whatsapp', whatsapp_key, id, lead_name, organization_name, phone,
                           whatsapp_no, email, status::text, party_id, utm_source, utm_medium,
                           utm_campaign, (metadata->>'created_at')::timestamptz
                      FROM lead.leads
-                    WHERE company_id = $1 AND {live} AND whatsapp_key IS NOT NULL
+                    WHERE {live} AND whatsapp_key IS NOT NULL
                    UNION ALL
                    SELECT 'email', email_key, id, lead_name, organization_name, phone,
                           whatsapp_no, email, status::text, party_id, utm_source, utm_medium,
                           utm_campaign, (metadata->>'created_at')::timestamptz
                      FROM lead.leads
-                    WHERE company_id = $1 AND {live} AND email_key IS NOT NULL
+                    WHERE {live} AND email_key IS NOT NULL
                    UNION ALL
                    SELECT 'org', org_key, id, lead_name, organization_name, phone,
                           whatsapp_no, email, status::text, party_id, utm_source, utm_medium,
                           utm_campaign, (metadata->>'created_at')::timestamptz
                      FROM lead.leads
-                    WHERE company_id = $1 AND {live} AND org_key IS NOT NULL
+                    WHERE {live} AND org_key IS NOT NULL
                ),
                g AS (
                    SELECT key_kind, key_value, count(*)::bigint AS member_count
-                     FROM k GROUP BY key_kind, key_value HAVING count(*) >= $2
+                     FROM k GROUP BY key_kind, key_value HAVING count(*) >= $1
                )
                SELECT g.key_kind   AS key_kind,
                       g.key_value  AS key_value,
@@ -322,17 +327,19 @@ impl LeadRepository {
                  FROM g JOIN k USING (key_kind, key_value)
                 GROUP BY g.key_kind, g.key_value, g.member_count
                 ORDER BY g.member_count DESC, g.key_kind, g.key_value
-                LIMIT $3"#,
+                LIMIT $2"#,
             live = LIVE
         );
-        let rows = company_scope::fetch_all_rows_scoped(
-            pool,
-            sqlx::query(&sql)
-                .bind(company_id)
-                .bind(min_group_size)
-                .bind(limit),
-        )
-        .await?;
+        let query = sqlx::query(&sql).bind(min_group_size).bind(limit);
+        let rows = if let Some(scope) = org_scope::current_org_scope() {
+            let mut tx = pool.begin().await?;
+            org_scope::bind_org_scope_on(&mut tx, &scope).await?;
+            let rows = query.fetch_all(&mut *tx).await?;
+            tx.commit().await?; // read-only: nothing but the relayed scope to close out
+            rows
+        } else {
+            query.fetch_all(pool).await?
+        };
         Ok(rows
             .into_iter()
             .map(|r| DuplicateKeyGroupRow {
@@ -346,10 +353,11 @@ impl LeadRepository {
 
     /// Fetch the leads a merge decision needs, row-locked.
     ///
-    /// Takes the CALLER'S transaction (already company-bound) so the lock, the classification, and
+    /// Takes the CALLER'S transaction (already scope-relayed) so the lock, the classification, and
     /// the mutations are one unit. `ORDER BY id` gives every concurrent merge the same lock order, so
-    /// overlapping batches serialize instead of deadlocking. RLS fences cross-tenant ids out of the
-    /// result (zero rows → the caller answers a fence-shaped 404). Soft-deleted rows are excluded.
+    /// overlapping batches serialize instead of deadlocking. The decorator's row-level fence keeps
+    /// out-of-scope ids out of the result (zero rows → the caller answers a fence-shaped 404).
+    /// Soft-deleted rows are excluded.
     pub async fn fetch_for_merge(
         &self,
         conn: &mut sqlx::PgConnection,

@@ -34,9 +34,6 @@ use crate::domain::entity::LeadStatus;
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateLeadDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "validation", validate(length(max = 140)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(alias = "lead_name")]
@@ -96,9 +93,6 @@ pub struct CreateLeadDto {
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateLeadDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "validation", validate(length(max = 140)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(alias = "lead_name")]
@@ -158,9 +152,6 @@ pub struct UpdateLeadDto {
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct PatchLeadDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(skip_serializing_if = "Option::is_none", alias = "company_id")]
-    pub company_id: Option<Uuid>,
     #[cfg_attr(feature = "validation", validate(length(max = 140)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "lead_name")]
@@ -212,7 +203,7 @@ pub struct PatchLeadDto {
 impl PatchLeadDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.company_id.is_some() || self.lead_name.is_some() || self.organization_name.is_some() || self.phone.is_some() || self.whatsapp_no.is_some() || self.email.is_some() || self.source.is_some() || self.campaign_id.is_some() || self.status.is_some() || self.party_id.is_some() || self.converted_at.is_some() || self.notes.is_some() || self.owner_user_id.is_some() || self.sales_team_id.is_some() || self.utm_source.is_some() || self.utm_medium.is_some() || self.utm_campaign.is_some() || self.merged_into_lead_id.is_some() || self.merged_at.is_some()
+        self.lead_name.is_some() || self.organization_name.is_some() || self.phone.is_some() || self.whatsapp_no.is_some() || self.email.is_some() || self.source.is_some() || self.campaign_id.is_some() || self.status.is_some() || self.party_id.is_some() || self.converted_at.is_some() || self.notes.is_some() || self.owner_user_id.is_some() || self.sales_team_id.is_some() || self.utm_source.is_some() || self.utm_medium.is_some() || self.utm_campaign.is_some() || self.merged_into_lead_id.is_some() || self.merged_at.is_some()
     }
 }
 
@@ -230,8 +221,6 @@ impl PatchLeadDto {
 pub struct LeadResponseDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub id: Uuid,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub lead_name: String,
     pub organization_name: Option<String>,
@@ -308,9 +297,9 @@ impl LeadListResponseDto {
 #[serde(rename_all = "camelCase")]
 pub struct LeadSummaryDto {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub lead_name: String,
     pub organization_name: Option<String>,
+    pub phone: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -322,7 +311,6 @@ impl From<Lead> for LeadResponseDto {
     fn from(entity: Lead) -> Self {
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             lead_name: entity.lead_name,
             organization_name: entity.organization_name,
             phone: entity.phone,
@@ -351,9 +339,9 @@ impl From<Lead> for LeadSummaryDto {
         let created_at = backbone_core::PersistentEntity::created_at(&entity);
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             lead_name: entity.lead_name,
             organization_name: entity.organization_name,
+            phone: entity.phone,
             created_at,
         }
     }
@@ -363,7 +351,6 @@ impl From<CreateLeadDto> for Lead {
     fn from(dto: CreateLeadDto) -> Self {
         Self {
             id: Uuid::new_v4(),
-            company_id: dto.company_id,
             lead_name: dto.lead_name,
             organization_name: dto.organization_name,
             phone: dto.phone,
@@ -391,7 +378,6 @@ impl From<&Lead> for LeadResponseDto {
     fn from(entity: &Lead) -> Self {
         Self {
             id: entity.id.clone(),
-            company_id: entity.company_id.clone(),
             lead_name: entity.lead_name.clone(),
             organization_name: entity.organization_name.clone(),
             phone: entity.phone.clone(),
@@ -423,7 +409,6 @@ impl backbone_core::FromCreateDto<CreateLeadDto> for Lead {
 
 impl backbone_core::ApplyUpdateDto<UpdateLeadDto> for Lead {
     fn apply_update(mut self, dto: UpdateLeadDto) -> backbone_core::ServiceResult<Self> {
-        self.company_id = dto.company_id;
         self.lead_name = dto.lead_name;
         self.organization_name = dto.organization_name;
         self.phone = dto.phone;

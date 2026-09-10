@@ -48,7 +48,6 @@ impl From<LeadId> for Uuid {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeadDto {
     pub id: LeadId,
-    pub company_id: Uuid,
     pub lead_name: String,
     pub organization_name: Option<String>,
     pub phone: Option<String>,

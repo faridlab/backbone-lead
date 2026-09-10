@@ -5,6 +5,9 @@
 //! qualify orchestration) and `LeadConverted` (a party minted a Customer — emitted by the app's
 //! convert orchestration). Ported from backbone-crm's `crm_events.rs`.
 //!
+//! Tenancy (ADR-0029): event payloads carry no tenant key — consumers that need one resolve it
+//! through their own composition.
+//!
 //! `LeadMerged` (duplicate leads soft-absorbed into a master) is published by THIS module's
 //! merge verb after its transaction commits — merge is single-table, unlike the cross-module
 //! qualify/convert orchestrations. The union is historically named `LeadConversionEvent`; it
@@ -18,7 +21,6 @@ use uuid::Uuid;
 pub struct LeadQualified {
     pub lead_id: Uuid,
     pub opportunity_id: Uuid,
-    pub company_id: Uuid,
 }
 
 /// A lead was resolved to a Customer — the identity ACL (party minted the Customer).
@@ -27,7 +29,6 @@ pub struct LeadQualified {
 pub struct LeadConverted {
     pub lead_id: Uuid,
     pub party_id: Uuid,
-    pub company_id: Uuid,
 }
 
 /// Duplicate leads were soft-absorbed into a master. Published after the merge transaction
@@ -38,7 +39,6 @@ pub struct LeadConverted {
 pub struct LeadMerged {
     pub lead_id: Uuid,
     pub absorbed_ids: Vec<Uuid>,
-    pub company_id: Uuid,
 }
 
 /// The lead funnel-event union (distinct from the generated CRUD `LeadEvent`).

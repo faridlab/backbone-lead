@@ -3,14 +3,20 @@
 //! Sibling of [`super::lead_write_service`] (the hub): same `impl LeadWriteService`, chunked
 //! here per the family's split pattern. Two verbs and one read:
 //!
-//! - `duplicate_candidate_groups` — live leads of one company grouped by a shared normalized
-//!   contact key (digits-canonicalized phone/WhatsApp, trimmed+lowered email, whitespace-
-//!   collapsed organization). Groups are PER-KEY: a pair matching on phone AND email yields two
-//!   groups sharing members; connected-component closure is deliberately not attempted (merging
-//!   either group dissolves the overlap on the next scan).
+//! - `duplicate_candidate_groups` — live leads within the caller's scope grouped by a shared
+//!   normalized contact key (digits-canonicalized phone/WhatsApp, trimmed+lowered email,
+//!   whitespace-collapsed organization). Groups are PER-KEY: a pair matching on phone AND email
+//!   yields two groups sharing members; connected-component closure is deliberately not
+//!   attempted (merging either group dissolves the overlap on the next scan).
 //! - `merge_leads` — soft-absorb dupes into a master. One transaction: fetch row-locked →
 //!   classify → fill master fields → absorb → commit; the `LeadMerged` event publishes AFTER
 //!   commit, and only when a lead was newly absorbed (an idempotent re-merge is silent).
+//!
+//! Tenancy (ADR-0029): the module carries no tenant key. The scan and the merge transaction
+//! relay the composing service's ambient request org scope
+//! (`backbone_orm::org_scope::current_org_scope` → `bind_org_scope_on`), so the
+//! decorator-installed row-level fence scopes both; an unfenced deployment reads and writes
+//! plain.
 //!
 //! Assignment (`owner_user_id` / `sales_team_id`) is STORED only. Autofill, round-robin, and
 //! leader-fallback defaults are the composing service's job — do not look for them here.
@@ -22,7 +28,7 @@
 
 use std::collections::HashMap;
 
-use backbone_orm::company_scope;
+use backbone_orm::org_scope;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -60,7 +66,7 @@ pub struct GroupMember {
     pub created_at: Option<DateTime<Utc>>,
 }
 
-/// A duplicate-candidate group: every live lead of the company sharing one normalized key.
+/// A duplicate-candidate group: every live lead in scope sharing one normalized key.
 /// `members` are in confidence order (most credible master first) and `suggested_master_id`
 /// is that first member.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -160,13 +166,12 @@ fn fill_or_keep<T: Clone>(
 // ── verbs ─────────────────────────────────────────────────────────────────────
 
 impl LeadWriteService {
-    /// Read the duplicate-candidate groups of one company.
+    /// Read the duplicate-candidate groups within the caller's scope.
     ///
     /// Members come back in confidence order with the suggested master first. Absorbed and
     /// soft-deleted leads never appear (the scan filters both in SQL).
     pub async fn duplicate_candidate_groups(
         &self,
-        company_id: Uuid,
         min_group_size: i64,
         limit: i64,
     ) -> Result<Vec<DuplicateGroup>, LeadError> {
@@ -176,12 +181,10 @@ impl LeadWriteService {
         if !(1..=500).contains(&limit) {
             return Err(LeadError::Invalid("limit must be between 1 and 500".into()));
         }
-        let scanned = company_scope::with_company_scope(Some(company_id), async {
-            self.leads
-                .find_duplicate_key_groups(&self.pool, company_id, min_group_size, limit)
-                .await
-        })
-        .await?;
+        let scanned = self
+            .leads
+            .find_duplicate_key_groups(&self.pool, min_group_size, limit)
+            .await?;
         let mut groups = Vec::with_capacity(scanned.len());
         for g in scanned {
             let mut members: Vec<GroupMember> = serde_json::from_value(g.members).map_err(|e| {
@@ -214,11 +217,11 @@ impl LeadWriteService {
     /// may be a master but NEVER a dupe (the `party_id` anchor is one-shot) — naming one as an
     /// absorb target refuses the WHOLE request atomically, before any write. Absorb ids
     /// already pointing at this master are idempotent no-ops; ids belonging to a different
-    /// master change nothing and come back in `already_absorbed_elsewhere`. Cross-tenant ids
-    /// simply do not resolve (RLS fences the fetch) — the fence-shaped answer is 404.
+    /// master change nothing and come back in `already_absorbed_elsewhere`. Ids outside the
+    /// caller's scope simply do not resolve (the composing decorator's row-level fence hides
+    /// them) — the fence-shaped answer is 404.
     pub async fn merge_leads(
         &self,
-        company_id: Uuid,
         master: Option<Uuid>,
         ids: Vec<Uuid>,
     ) -> Result<MergeOutcome, LeadError> {
@@ -251,7 +254,7 @@ impl LeadWriteService {
         }
         let ids = seen;
 
-        // One transaction, company-bound, row-locked in deterministic id order. The fetch set
+        // One transaction, scope-relayed, row-locked in deterministic id order. The fetch set
         // is the absorb ids PLUS the pinned master (the auto pick is always inside the set).
         let mut fetch_ids = ids.clone();
         if let Some(m) = master {
@@ -260,7 +263,12 @@ impl LeadWriteService {
             }
         }
         let mut tx = self.pool.begin().await?;
-        company_scope::bind_company_on(&mut tx, company_id).await?;
+        // Tenancy (ADR-0029): relay the composing service's ambient request org scope so the
+        // decorator's row-level fence applies to every statement of this transaction. An
+        // unfenced deployment runs the transaction plain.
+        if let Some(org) = org_scope::current_org_scope() {
+            org_scope::bind_org_scope_on(&mut *tx, &org).await?;
+        }
         let mut rows: HashMap<Uuid, LeadMatchRow> = self
             .leads
             .fetch_for_merge(&mut tx, &fetch_ids)
@@ -268,9 +276,10 @@ impl LeadWriteService {
             .into_iter()
             .map(|r| (r.id, r))
             .collect();
-        // Every named id must resolve inside this company (RLS-shaped miss for a cross-tenant
-        // or unknown id — the fence's 404, never a leak that it exists elsewhere). The pinned
-        // master is held to the same fence: a cross-tenant or unknown master id refuses too.
+        // Every named id must resolve inside the caller's scope (a fence-shaped miss for an
+        // out-of-scope or unknown id — the 404, never a leak that it exists elsewhere). The
+        // pinned master is held to the same fence: an out-of-scope or unknown master id
+        // refuses too.
         if rows.len() != fetch_ids.len() {
             return Err(LeadError::NotFound("lead"));
         }
@@ -406,7 +415,6 @@ impl LeadWriteService {
             self.sink.publish(&LeadConversionEvent::LeadMerged(LeadMerged {
                 lead_id: master_id,
                 absorbed_ids: absorbed_ids.clone(),
-                company_id,
             }));
         }
 

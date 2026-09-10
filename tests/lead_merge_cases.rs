@@ -2,13 +2,13 @@
 //!
 //! DB-backed, against real Postgres (`lead` schema): normalization goldens for the generated
 //! match-key columns, duplicate-candidate grouping, the confidence-ordered master pick, the
-//! merge field-fill rule, idempotence, refusals, and the RLS fence over the new columns.
+//! merge field-fill rule, idempotence, and refusals.
 //! Requires DATABASE_URL; the family convention is a scratch database created inside the
 //! running dev postgres container and dropped afterwards.
 
 use std::sync::{Arc, Mutex};
 
-use sqlx::{Acquire, PgPool, Row};
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use backbone_lead::application::service::lead_write_service::{LeadError, LeadWriteService, NewLead};
@@ -16,7 +16,7 @@ use backbone_lead::domain::event::{LeadConversionEvent, LeadEventSink};
 
 fn db_url() -> String {
     std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://serpa:serpa_dev_password@127.0.0.1:5432/lead_merge_test".into())
+        .unwrap_or_else(|_| "postgresql://postgres:postgres@127.0.0.1:5433/lead_merge_test".into())
 }
 
 async fn pool() -> PgPool {
@@ -24,9 +24,8 @@ async fn pool() -> PgPool {
 }
 
 /// Capture a lead through the real write path.
-async fn capture(svc: &LeadWriteService, company: Uuid, name: &str, phone: Option<&str>, wa: Option<&str>, email: Option<&str>) -> Uuid {
+async fn capture(svc: &LeadWriteService, name: &str, phone: Option<&str>, wa: Option<&str>, email: Option<&str>) -> Uuid {
     svc.create_lead(NewLead {
-        company_id: company,
         lead_name: name.into(),
         organization_name: None,
         phone: phone.map(str::to_string),
@@ -48,13 +47,11 @@ async fn capture(svc: &LeadWriteService, company: Uuid, name: &str, phone: Optio
 /// Capture a lead carrying UTM attribution, through the real write path.
 async fn capture_with_utm(
     svc: &LeadWriteService,
-    company: Uuid,
     name: &str,
     phone: &str,
     utm: Option<(&str, &str, &str)>,
 ) -> Uuid {
     svc.create_lead(NewLead {
-        company_id: company,
         lead_name: name.into(),
         organization_name: None,
         phone: Some(phone.into()),
@@ -105,6 +102,54 @@ async fn soft_delete(pool: &PgPool, id: Uuid) {
         .bind(id).execute(pool).await.unwrap();
 }
 
+/// A run-unique 8-digit string. The duplicate scan is database-wide (the tenant fence is the
+/// composing service's decorator, absent here), so the scan tests derive their contact
+/// values from this instead of fixed numbers — fixed values would collide with rows left by
+/// a previous run on the same scratch database, and with sibling tests running in parallel.
+/// A per-process counter guarantees distinct values even when consecutive calls land on the
+/// same clock tick; the clock keeps values distinct across runs and processes.
+fn run_digits() -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let step = SEQ.fetch_add(1, Ordering::Relaxed) as u64;
+    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let tick = (d.as_secs() << 20) ^ (d.subsec_nanos() as u64);
+    format!("{:08}", tick.wrapping_add(step.wrapping_mul(0x9E3779B1)) % 100_000_000)
+}
+
+/// Two formatted phone variants that normalize onto the same run-unique phone key, plus that
+/// key: '+62 9dd-ddd-ddd' and '09dddddddd' both canonicalize to '629dddddddd'.
+fn unique_phone_pair() -> (String, String, String) {
+    let body = format!("9{}", run_digits());
+    let key = format!("62{body}");
+    (
+        format!("+62 {}-{}-{}", &body[0..3], &body[3..6], &body[6..]),
+        format!("0{body}"),
+        key,
+    )
+}
+
+/// A run-unique email (the key normalizes to its lowercase form).
+fn unique_email() -> String {
+    format!("dupe-{}@scan.example", run_digits())
+}
+
+/// The candidate groups whose member set is exactly `ids` — this test's own cluster, picked
+/// out of the database-wide scan (other rows on the shared scratch database group too).
+fn groups_over<'g>(
+    groups: &'g [backbone_lead::application::service::lead_merge::DuplicateGroup],
+    ids: &[Uuid],
+) -> Vec<&'g backbone_lead::application::service::lead_merge::DuplicateGroup> {
+    groups
+        .iter()
+        .filter(|g| {
+            let member_ids: Vec<Uuid> = g.members.iter().map(|m| m.id).collect();
+            member_ids.len() == ids.len() && ids.iter().all(|id| member_ids.contains(id))
+        })
+        .collect()
+}
+
 async fn key_of(pool: &PgPool, id: Uuid, col: &str) -> Option<String> {
     let q = format!("SELECT {col} FROM lead.leads WHERE id = $1");
     sqlx::query_scalar(&q).bind(id).fetch_one(pool).await.unwrap()
@@ -119,7 +164,6 @@ async fn key_of(pool: &PgPool, id: Uuid, col: &str) -> Option<String> {
 #[tokio::test]
 async fn normalization_goldens() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let id_plus62 = Uuid::new_v4();
     let id_domestic = Uuid::new_v4();
     let id_bare8 = Uuid::new_v4();
@@ -136,9 +180,9 @@ async fn normalization_goldens() {
         (id_empty, Some(""), Some(""), Some("")),
     ] {
         sqlx::query(
-            "INSERT INTO lead.leads (id, company_id, lead_name, phone, email, organization_name) VALUES ($1,$2,'NG',$3,$4,$5)",
+            "INSERT INTO lead.leads (id, lead_name, phone, email, organization_name) VALUES ($1,'NG',$2,$3,$4)",
         )
-        .bind(id).bind(company).bind(phone).bind(email).bind(org)
+        .bind(id).bind(phone).bind(email).bind(org)
         .execute(&pool)
         .await
         .unwrap();
@@ -167,20 +211,21 @@ async fn normalization_goldens() {
 async fn grouping_by_normalized_key() {
     let pool = pool().await;
     let svc = LeadWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
 
-    // DG-1: phone variants only.
-    let a = capture(&svc, company, "Andi", Some("+62 812-3456-789"), None, None).await;
-    let b = capture(&svc, company, "Andi dupe", Some("0812-3456-789"), None, None).await;
+    // DG-1: phone variants only, on this run's own key namespace.
+    let (phone_a, phone_b, phone_key) = unique_phone_pair();
+    let a = capture(&svc, "Andi", Some(&phone_a), None, None).await;
+    let b = capture(&svc, "Andi dupe", Some(&phone_b), None, None).await;
     // Same status / recency on both → the members' confidence order falls to the uuid tiebreak.
     for id in [a, b] {
         set_created_at(&pool, id, "2026-02-01T00:00:00+00:00").await;
     }
-    let groups = svc.duplicate_candidate_groups(company, 2, 50).await.unwrap();
-    assert_eq!(groups.len(), 1, "formatted variants join into exactly one group");
-    let g = &groups[0];
+    let groups = svc.duplicate_candidate_groups(2, 50).await.unwrap();
+    let own = groups_over(&groups, &[a, b]);
+    assert_eq!(own.len(), 1, "formatted variants join into exactly one group");
+    let g = own[0];
     assert_eq!(g.key_kind, "phone");
-    assert_eq!(g.key_value, "628123456789");
+    assert_eq!(g.key_value, phone_key);
     assert_eq!(g.member_count, 2);
     let mut expected = vec![a, b];
     expected.sort();
@@ -188,12 +233,14 @@ async fn grouping_by_normalized_key() {
     assert_eq!(g.suggested_master_id, expected[0]);
 
     // DG-2: add an email match on the same pair → a second group with the same members.
-    sqlx::query("UPDATE lead.leads SET email='Andi@Mail.ID' WHERE id = ANY($1)")
-        .bind(vec![a, b]).execute(&pool).await.unwrap();
-    let groups = svc.duplicate_candidate_groups(company, 2, 50).await.unwrap();
-    assert_eq!(groups.len(), 2, "phone AND email matches are two per-key groups, not one merged cluster");
-    let email_group = groups.iter().find(|g| g.key_kind == "email").expect("email group present");
-    assert_eq!(email_group.key_value, "andi@mail.id");
+    let email = unique_email();
+    sqlx::query("UPDATE lead.leads SET email=$2 WHERE id = ANY($1)")
+        .bind(vec![a, b]).bind(&email).execute(&pool).await.unwrap();
+    let groups = svc.duplicate_candidate_groups(2, 50).await.unwrap();
+    let own = groups_over(&groups, &[a, b]);
+    assert_eq!(own.len(), 2, "phone AND email matches are two per-key groups, not one merged cluster");
+    let email_group = own.iter().find(|g| g.key_kind == "email").expect("email group present");
+    assert_eq!(email_group.key_value, email.to_lowercase());
     assert_eq!(email_group.member_count, 2);
 }
 
@@ -202,37 +249,37 @@ async fn grouping_by_normalized_key() {
 async fn absorbed_and_deleted_leave_the_scan() {
     let pool = pool().await;
     let svc = LeadWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let a = capture(&svc, company, "Budi", Some("+62 813-1111-2222"), None, None).await;
-    let b = capture(&svc, company, "Budi dupe", Some("0813-1111-2222"), None, None).await;
-    assert_eq!(svc.duplicate_candidate_groups(company, 2, 50).await.unwrap().len(), 1);
+    let (phone_a, phone_b, _) = unique_phone_pair();
+    let a = capture(&svc, "Budi", Some(&phone_a), None, None).await;
+    let b = capture(&svc, "Budi dupe", Some(&phone_b), None, None).await;
+    use backbone_lead::application::service::lead_merge::DuplicateGroup;
+    let in_scan = |groups: &[DuplicateGroup], id: Uuid| {
+        groups.iter().any(|g| g.members.iter().any(|m| m.id == id))
+    };
 
-    svc.merge_leads(company, Some(a), vec![b]).await.unwrap();
+    let groups = svc.duplicate_candidate_groups(2, 50).await.unwrap();
     assert!(
-        svc.duplicate_candidate_groups(company, 2, 50).await.unwrap().is_empty(),
+        in_scan(&groups, a) && in_scan(&groups, b),
+        "the fresh pair is a duplicate candidate"
+    );
+
+    svc.merge_leads(Some(a), vec![b]).await.unwrap();
+    let groups = svc.duplicate_candidate_groups(2, 50).await.unwrap();
+    assert!(
+        !in_scan(&groups, a) && !in_scan(&groups, b),
         "DG-3: the absorbed pair leaves the scan"
     );
 
     // DG-4: a fresh pair where one side goes soft-deleted.
-    capture(&svc, company, "Citra", Some("+62 813-3333-4444"), None, None).await;
-    let d = capture(&svc, company, "Citra dupe", Some("0813-3333-4444"), None, None).await;
+    let (phone_c, phone_d, _) = unique_phone_pair();
+    let c = capture(&svc, "Citra", Some(&phone_c), None, None).await;
+    let d = capture(&svc, "Citra dupe", Some(&phone_d), None, None).await;
     soft_delete(&pool, d).await;
+    let groups = svc.duplicate_candidate_groups(2, 50).await.unwrap();
     assert!(
-        svc.duplicate_candidate_groups(company, 2, 50).await.unwrap().is_empty(),
+        !in_scan(&groups, c) && !in_scan(&groups, d),
         "DG-4: the soft-deleted side leaves the scan"
     );
-}
-
-/// DG-5: leads of two companies never co-group — the scan is company-scoped end to end.
-#[tokio::test]
-async fn cross_company_never_co_groups() {
-    let svc = LeadWriteService::new(pool().await);
-    let a_co = Uuid::new_v4();
-    let b_co = Uuid::new_v4();
-    capture(&svc, a_co, "Dewi", Some("+62 814-5555-6666"), None, None).await;
-    capture(&svc, b_co, "Dewi other tenant", Some("0814-5555-6666"), None, None).await;
-    assert!(svc.duplicate_candidate_groups(a_co, 2, 50).await.unwrap().is_empty());
-    assert!(svc.duplicate_candidate_groups(b_co, 2, 50).await.unwrap().is_empty());
 }
 
 // ── MG: confidence-ordered master pick ────────────────────────────────────────
@@ -243,11 +290,10 @@ async fn cross_company_never_co_groups() {
 async fn status_precedence_picks_the_master() {
     let pool = pool().await;
     let svc = LeadWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let ids: Vec<Uuid> = (0..5).map(|_| Uuid::new_v4()).collect();
     for (i, id) in ids.iter().enumerate() {
-        sqlx::query("INSERT INTO lead.leads (id, company_id, lead_name, phone) VALUES ($1,$2,'Eka',$3)")
-            .bind(id).bind(company).bind(format!("seed-{i}"))
+        sqlx::query("INSERT INTO lead.leads (id, lead_name, phone) VALUES ($1,'Eka',$2)")
+            .bind(id).bind(format!("seed-{i}"))
             .execute(&pool).await.unwrap();
     }
     let [l_new, l_contacted, l_qualified, l_converted, l_junk] = [ids[0], ids[1], ids[2], ids[3], ids[4]];
@@ -258,7 +304,7 @@ async fn status_precedence_picks_the_master() {
     set_party_anchor(&pool, l_converted).await;
     set_status(&pool, l_junk, "junk").await;
 
-    let outcome = svc.merge_leads(company, None, ids.clone()).await.unwrap();
+    let outcome = svc.merge_leads(None, ids.clone()).await.unwrap();
     assert_eq!(outcome.master_id, l_converted, "converted outranks qualified/contacted/new/junk");
 
     // The master's party anchor is untouched; every dupe is absorbed into the converted master.
@@ -281,32 +327,37 @@ async fn recency_then_uuid_tiebreak_is_deterministic() {
     let svc = LeadWriteService::new(pool.clone());
 
     // MG-2: junk (older) vs lost (newer) → the newer lost lead masters.
-    let company = Uuid::new_v4();
-    let j = capture(&svc, company, "Fajar", Some("+62 816-1"), None, None).await;
-    let l = capture(&svc, company, "Fajar", Some("0816-1"), None, None).await;
+    let j = capture(&svc, "Fajar", Some("+62 816-1"), None, None).await;
+    let l = capture(&svc, "Fajar", Some("0816-1"), None, None).await;
     sqlx::query("UPDATE lead.leads SET phone=NULL, whatsapp_no='+62 816-777-8888' WHERE id = ANY($1)")
         .bind(vec![j, l]).execute(&pool).await.unwrap();
     set_status(&pool, j, "junk").await;
     set_status(&pool, l, "lost").await;
     set_created_at(&pool, j, "2026-01-01T00:00:00+00:00").await;
     set_created_at(&pool, l, "2026-06-01T00:00:00+00:00").await;
-    let outcome = svc.merge_leads(company, None, vec![j, l]).await.unwrap();
+    let outcome = svc.merge_leads(None, vec![j, l]).await.unwrap();
     assert_eq!(outcome.master_id, l, "MG-2: same bottom status rank — newest created_at wins");
 
     // MG-3: identical status, party, created_at → smallest uuid wins, repeatedly.
-    let company2 = Uuid::new_v4();
-    let x = capture(&svc, company2, "Gita", Some("+62 817-1"), None, None).await;
-    let y = capture(&svc, company2, "Gita", Some("0817-1"), None, None).await;
-    sqlx::query("UPDATE lead.leads SET phone=NULL, whatsapp_no='+62 817-999-0000' WHERE id = ANY($1)")
-        .bind(vec![x, y]).execute(&pool).await.unwrap();
+    let (phone_x, phone_y, _) = unique_phone_pair();
+    let x = capture(&svc, "Gita", Some(&phone_x), None, None).await;
+    let y = capture(&svc, "Gita", Some(&phone_y), None, None).await;
+    sqlx::query("UPDATE lead.leads SET phone=NULL, whatsapp_no=$2 WHERE id = $1")
+        .bind(x).bind(&phone_x).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE lead.leads SET phone=NULL, whatsapp_no=$2 WHERE id = $1")
+        .bind(y).bind(&phone_y).execute(&pool).await.unwrap();
     for id in [x, y] {
         set_created_at(&pool, id, "2026-03-01T12:00:00+00:00").await;
     }
     let expected = x.min(y);
     for _ in 0..3 {
-        let groups = svc.duplicate_candidate_groups(company2, 2, 50).await.unwrap();
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].suggested_master_id, expected, "MG-3: full tie — smallest uuid wins, every scan");
+        let groups = svc.duplicate_candidate_groups(2, 50).await.unwrap();
+        let own: Vec<_> = groups
+            .iter()
+            .filter(|g| g.members.iter().any(|m| m.id == x))
+            .collect();
+        assert_eq!(own.len(), 1, "exactly one candidate group carries this run's tie pair");
+        assert_eq!(own[0].suggested_master_id, expected, "MG-3: full tie — smallest uuid wins, every scan");
     }
 }
 
@@ -316,9 +367,8 @@ async fn recency_then_uuid_tiebreak_is_deterministic() {
 async fn field_fill_prefers_master_then_dupes() {
     let pool = pool().await;
     let svc = LeadWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let master = capture(&svc, company, "Master", Some("+62 818-1"), None, None).await;
-    let dupe = capture(&svc, company, "Dupe", Some("0818-1"), None, None).await;
+    let master = capture(&svc, "Master", Some("+62 818-1"), None, None).await;
+    let dupe = capture(&svc, "Dupe", Some("0818-1"), None, None).await;
     let (campaign, owner, team) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
     // Both share the whatsapp identity so they are true duplicates.
     sqlx::query(
@@ -336,7 +386,7 @@ async fn field_fill_prefers_master_then_dupes() {
     )
     .bind(dupe).execute(&pool).await.unwrap();
 
-    let outcome = svc.merge_leads(company, Some(master), vec![dupe]).await.unwrap();
+    let outcome = svc.merge_leads(Some(master), vec![dupe]).await.unwrap();
     assert_eq!(outcome.master_id, master, "a pinned master overrides the confidence pick");
 
     let row = sqlx::query(
@@ -374,19 +424,18 @@ async fn field_fill_prefers_master_then_dupes() {
 async fn merge_is_idempotent_and_redirects() {
     let pool = pool().await;
     let svc = LeadWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
 
     // IDM-1: A masters B; re-running the identical pinned merge is a no-op.
-    let a = capture(&svc, company, "Hadi", Some("+62 819-1"), None, None).await;
-    let b = capture(&svc, company, "Hadi", Some("0819-1"), None, None).await;
+    let a = capture(&svc, "Hadi", Some("+62 819-1"), None, None).await;
+    let b = capture(&svc, "Hadi", Some("0819-1"), None, None).await;
     sqlx::query("UPDATE lead.leads SET phone=NULL, whatsapp_no='+62 819-111-2222' WHERE id = ANY($1)")
         .bind(vec![a, b]).execute(&pool).await.unwrap();
-    let first = svc.merge_leads(company, Some(a), vec![b]).await.unwrap();
+    let first = svc.merge_leads(Some(a), vec![b]).await.unwrap();
     assert_eq!(first.absorbed_ids, vec![b]);
     let stamp: chrono::DateTime<chrono::Utc> =
         sqlx::query_scalar("SELECT merged_at FROM lead.leads WHERE id=$1").bind(b).fetch_one(&pool).await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    let again = svc.merge_leads(company, Some(a), vec![b]).await.unwrap();
+    let again = svc.merge_leads(Some(a), vec![b]).await.unwrap();
     assert_eq!(again.absorbed_ids, vec![b], "idempotent ids still listed");
     assert!(again.already_absorbed_elsewhere.is_empty());
     let stamp2: chrono::DateTime<chrono::Utc> =
@@ -395,12 +444,12 @@ async fn merge_is_idempotent_and_redirects() {
 
     // IDM-2: C masters D; pinning C again while absorbing B (already A's dupe) reports B → A
     // WITHOUT changing anything.
-    let c = capture(&svc, company, "Indra", Some("+62 820-1"), None, None).await;
-    let d = capture(&svc, company, "Indra", Some("0820-1"), None, None).await;
+    let c = capture(&svc, "Indra", Some("+62 820-1"), None, None).await;
+    let d = capture(&svc, "Indra", Some("0820-1"), None, None).await;
     sqlx::query("UPDATE lead.leads SET phone=NULL, whatsapp_no='+62 820-111-2222' WHERE id = ANY($1)")
         .bind(vec![c, d]).execute(&pool).await.unwrap();
-    svc.merge_leads(company, Some(c), vec![d]).await.unwrap();
-    let outcome = svc.merge_leads(company, Some(c), vec![b]).await.unwrap();
+    svc.merge_leads(Some(c), vec![d]).await.unwrap();
+    let outcome = svc.merge_leads(Some(c), vec![b]).await.unwrap();
     assert_eq!(outcome.already_absorbed_elsewhere.len(), 1);
     assert_eq!(outcome.already_absorbed_elsewhere[0].id, b);
     assert_eq!(outcome.already_absorbed_elsewhere[0].master_id, a, "reported under its REAL master");
@@ -408,13 +457,13 @@ async fn merge_is_idempotent_and_redirects() {
     assert_eq!(merged_into(&pool, b).await, Some(a), "B still points at A — no writes");
 
     // IDM-3: E was absorbed into F; pinning E afterwards redirects the merge to F.
-    let e = capture(&svc, company, "Joko", Some("+62 821-1"), None, None).await;
-    let f = capture(&svc, company, "Joko", Some("0821-1"), None, None).await;
-    let g = capture(&svc, company, "Joko", Some("+62 821-2"), None, None).await;
+    let e = capture(&svc, "Joko", Some("+62 821-1"), None, None).await;
+    let f = capture(&svc, "Joko", Some("0821-1"), None, None).await;
+    let g = capture(&svc, "Joko", Some("+62 821-2"), None, None).await;
     sqlx::query("UPDATE lead.leads SET phone=NULL, whatsapp_no='+62 821-333-4444' WHERE id = ANY($1)")
         .bind(vec![e, f, g]).execute(&pool).await.unwrap();
-    svc.merge_leads(company, Some(f), vec![e]).await.expect("F masters E");
-    let redirected = svc.merge_leads(company, Some(e), vec![g]).await.unwrap();
+    svc.merge_leads(Some(f), vec![e]).await.expect("F masters E");
+    let redirected = svc.merge_leads(Some(e), vec![g]).await.unwrap();
     assert_eq!(redirected.master_id, f, "pinned an absorbed lead → redirected to its master");
     assert_eq!(redirected.redirected_from, Some(e));
     assert_eq!(redirected.absorbed_ids, vec![g]);
@@ -429,15 +478,14 @@ async fn merge_is_idempotent_and_redirects() {
 async fn converted_dupe_refusal_is_atomic() {
     let pool = pool().await;
     let svc = LeadWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let a = capture(&svc, company, "Kiki", Some("+62 822-1"), None, None).await;
-    let b = capture(&svc, company, "Kiki", Some("0822-1"), None, None).await;
-    let c = capture(&svc, company, "Kiki", Some("+62 822-2"), None, None).await;
+    let a = capture(&svc, "Kiki", Some("+62 822-1"), None, None).await;
+    let b = capture(&svc, "Kiki", Some("0822-1"), None, None).await;
+    let c = capture(&svc, "Kiki", Some("+62 822-2"), None, None).await;
     sqlx::query("UPDATE lead.leads SET phone=NULL, whatsapp_no='+62 822-555-6666' WHERE id = ANY($1)")
         .bind(vec![a, b, c]).execute(&pool).await.unwrap();
     set_party_anchor(&pool, b).await;
 
-    let err = svc.merge_leads(company, Some(a), vec![b, c]).await.unwrap_err();
+    let err = svc.merge_leads(Some(a), vec![b, c]).await.unwrap_err();
     assert!(matches!(err, LeadError::AbsorbConverted(id) if id == b));
     assert_eq!(err.http_status(), 422);
     assert_eq!(err.code(), "absorb_converted");
@@ -450,39 +498,39 @@ async fn converted_dupe_refusal_is_atomic() {
 }
 
 /// RF-2: batch-shape refusals — self-absorb, empty absorb batch, oversized batches (pinned
-/// absorbs cap at 5; an auto batch caps at 6 = master + 5 absorbs); a cross-tenant id is a
-/// fence-shaped 404.
+/// absorbs cap at 5; an auto batch caps at 6 = master + 5 absorbs); an unknown id is a
+/// not-found 404.
 #[tokio::test]
 async fn batch_shape_refusals() {
     let pool = pool().await;
     let svc = LeadWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let a = capture(&svc, company, "Lia", Some("+62 823-1"), None, None).await;
+    let a = capture(&svc, "Lia", Some("+62 823-1"), None, None).await;
 
-    assert!(matches!(svc.merge_leads(company, Some(a), vec![a]).await.unwrap_err(), LeadError::AbsorbSelf));
+    assert!(matches!(svc.merge_leads(Some(a), vec![a]).await.unwrap_err(), LeadError::AbsorbSelf));
     assert!(matches!(
-        svc.merge_leads(company, Some(a), vec![]).await.unwrap_err(),
+        svc.merge_leads(Some(a), vec![]).await.unwrap_err(),
         LeadError::InvalidBatch(_)
     ));
     let six_absorbs: Vec<Uuid> = (0..6).map(|_| Uuid::new_v4()).collect();
     assert!(matches!(
-        svc.merge_leads(company, Some(a), six_absorbs).await.unwrap_err(),
+        svc.merge_leads(Some(a), six_absorbs).await.unwrap_err(),
         LeadError::InvalidBatch(_)
     ));
     let seven_auto: Vec<Uuid> = (0..7).map(|_| Uuid::new_v4()).collect();
     assert!(matches!(
-        svc.merge_leads(company, None, seven_auto).await.unwrap_err(),
+        svc.merge_leads(None, seven_auto).await.unwrap_err(),
         LeadError::InvalidBatch(_)
     ));
-    // A cross-tenant / unknown id must not resolve (the fence's 404 shape).
+    // An unknown id must not resolve (the 404 shape; out-of-scope ids answer the same way
+    // under a composing decorator's fence — probed host-side).
     let ghost = Uuid::new_v4();
     assert!(matches!(
-        svc.merge_leads(company, Some(a), vec![ghost]).await.unwrap_err(),
+        svc.merge_leads(Some(a), vec![ghost]).await.unwrap_err(),
         LeadError::NotFound(_)
     ));
     // Bad scan parameters are a typed 422.
     assert!(matches!(
-        svc.duplicate_candidate_groups(company, 1, 50).await.unwrap_err(),
+        svc.duplicate_candidate_groups(1, 50).await.unwrap_err(),
         LeadError::Invalid(_)
     ));
 }
@@ -517,7 +565,7 @@ impl LeadEventSink for PostCommitCheckingSink {
     }
 }
 
-/// RF-3: `LeadMerged` carries master + absorbed ids + company, and publishes only for merges
+/// RF-3: `LeadMerged` carries master + absorbed ids, and publishes only for merges
 /// that actually absorbed something (an idempotent re-merge is silent).
 #[tokio::test]
 async fn merged_event_publishes_post_commit_only_on_real_absorbs() {
@@ -527,13 +575,12 @@ async fn merged_event_publishes_post_commit_only_on_real_absorbs() {
         events: Mutex::new(vec![]),
     });
     let svc = LeadWriteService::with_sink(pool.clone(), sink.clone());
-    let company = Uuid::new_v4();
-    let a = capture(&svc, company, "Mira", Some("+62 824-1"), None, None).await;
-    let b = capture(&svc, company, "Mira", Some("0824-1"), None, None).await;
+    let a = capture(&svc, "Mira", Some("+62 824-1"), None, None).await;
+    let b = capture(&svc, "Mira", Some("0824-1"), None, None).await;
     sqlx::query("UPDATE lead.leads SET phone=NULL, whatsapp_no='+62 824-111-2222' WHERE id = ANY($1)")
         .bind(vec![a, b]).execute(&pool).await.unwrap();
 
-    svc.merge_leads(company, Some(a), vec![b]).await.unwrap();
+    svc.merge_leads(Some(a), vec![b]).await.unwrap();
     {
         let events = sink.events.lock().unwrap();
         assert_eq!(events.len(), 1, "exactly one event for one real absorb");
@@ -541,115 +588,13 @@ async fn merged_event_publishes_post_commit_only_on_real_absorbs() {
             LeadConversionEvent::LeadMerged(m) => {
                 assert_eq!(m.lead_id, a);
                 assert_eq!(m.absorbed_ids, vec![b]);
-                assert_eq!(m.company_id, company);
             }
             other => panic!("expected LeadMerged, got {other:?}"),
         }
     }
     // Idempotent re-merge: silent — no replayed event for consumers to re-point.
-    svc.merge_leads(company, Some(a), vec![b]).await.unwrap();
+    svc.merge_leads(Some(a), vec![b]).await.unwrap();
     assert_eq!(sink.events.lock().unwrap().len(), 1, "no-op re-merge publishes nothing");
-}
-
-// ── F: RLS fence over the new columns ─────────────────────────────────────────
-
-/// Walks the fence as a dedicated non-superuser role (superusers bypass RLS even under FORCE):
-/// F-1 unbound sees zero rows; F-2 a merge fetch naming another tenant's lead is a zero-row
-/// miss (the 404 shape); F-3 WITH CHECK rejects a cross-company write touching the new
-/// columns; F-4 the duplicate scan bound to company A returns only A's groups.
-#[tokio::test]
-async fn rls_fence_over_the_merge_columns() {
-    let pool = pool().await;
-    let a_co = Uuid::new_v4();
-    let b_co = Uuid::new_v4();
-    for _ in 0..2 {
-        sqlx::query("INSERT INTO lead.leads (id, company_id, lead_name, phone) VALUES ($1,$2,'F-A','+62 825-1111-1111')")
-            .bind(Uuid::new_v4()).bind(a_co).execute(&pool).await.unwrap();
-    }
-    let b_lead = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO lead.leads (id, company_id, lead_name, phone, owner_user_id, sales_team_id) VALUES ($1,$2,'F-B','+62 825-2222-2222',$3,$4)",
-    )
-    .bind(b_lead).bind(b_co).bind(Uuid::new_v4()).bind(Uuid::new_v4())
-    .execute(&pool).await.unwrap();
-
-    sqlx::query(
-        r#"DO $$ BEGIN
-               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lead_probe_rls') THEN
-                   CREATE ROLE lead_probe_rls NOLOGIN;
-               END IF;
-           END $$"#,
-    )
-    .execute(&pool).await.unwrap();
-    sqlx::query("GRANT USAGE ON SCHEMA lead TO lead_probe_rls").execute(&pool).await.unwrap();
-    sqlx::query("GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA lead TO lead_probe_rls")
-        .execute(&pool).await.unwrap();
-
-    let mut conn = pool.acquire().await.unwrap();
-    sqlx::query("SET ROLE lead_probe_rls").execute(&mut *conn).await.unwrap();
-
-    // F-1: unbound — zero rows, including reads of the new columns.
-    let mut tx = conn.begin().await.unwrap();
-    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM lead.leads").fetch_one(&mut *tx).await.unwrap();
-    assert_eq!(total, 0, "F-1: unbound role sees no leads");
-    let owners: i64 = sqlx::query_scalar("SELECT count(owner_user_id) FROM lead.leads").fetch_one(&mut *tx).await.unwrap();
-    assert_eq!(owners, 0, "F-1: new columns fenced with the table");
-    tx.commit().await.unwrap();
-
-    // F-2: bound to A, the merge fetch naming B's lead is a zero-row miss.
-    let mut tx = conn.begin().await.unwrap();
-    sqlx::query("SELECT set_config('app.company_id', $1, true)").bind(a_co.to_string()).execute(&mut *tx).await.unwrap();
-    let fetched: i64 = sqlx::query_scalar(
-        r#"SELECT count(*) FROM lead.leads
-            WHERE id = ANY($1) AND (metadata->>'deleted_at') IS NULL"#,
-    )
-    .bind(vec![b_lead])
-    .fetch_one(&mut *tx).await.unwrap();
-    assert_eq!(fetched, 0, "F-2: cross-tenant merge fetch is a fence-shaped miss");
-    let seen: i64 = sqlx::query_scalar("SELECT count(*) FROM lead.leads").fetch_one(&mut *tx).await.unwrap();
-    assert_eq!(seen, 2, "bound to A: exactly A's two leads");
-    tx.commit().await.unwrap();
-
-    // F-3: bound to A, a cross-company write touching owner_user_id is refused by WITH CHECK.
-    // The refused INSERT aborts its own transaction only.
-    let mut tx = conn.begin().await.unwrap();
-    sqlx::query("SELECT set_config('app.company_id', $1, true)").bind(a_co.to_string()).execute(&mut *tx).await.unwrap();
-    let refused = sqlx::query(
-        r#"INSERT INTO lead.leads (id, company_id, lead_name, phone, owner_user_id)
-           VALUES ($1,$2,'F-EVIL','+62 825-3',$3)"#,
-    )
-    .bind(Uuid::new_v4()).bind(b_co).bind(Uuid::new_v4())
-    .execute(&mut *tx)
-    .await;
-    assert!(refused.is_err(), "F-3: WITH CHECK rejects the cross-company insert");
-    drop(tx);
-    // The USING half: an UPDATE on B's row touches zero rows.
-    let mut tx = conn.begin().await.unwrap();
-    sqlx::query("SELECT set_config('app.company_id', $1, true)").bind(a_co.to_string()).execute(&mut *tx).await.unwrap();
-    let touched = sqlx::query("UPDATE lead.leads SET merged_into_lead_id=$2 WHERE id=$1")
-        .bind(b_lead).bind(Uuid::new_v4())
-        .execute(&mut *tx).await.unwrap();
-    assert_eq!(touched.rows_affected(), 0, "F-3: fenced UPDATE on another tenant's row touches nothing");
-    tx.commit().await.unwrap();
-
-    // F-4: the duplicate scan bound to A returns only A's groups (B's lead never leaks in).
-    let mut tx = conn.begin().await.unwrap();
-    sqlx::query("SELECT set_config('app.company_id', $1, true)").bind(a_co.to_string()).execute(&mut *tx).await.unwrap();
-    let groups: i64 = sqlx::query_scalar(
-        r#"WITH k AS (
-               SELECT phone_key AS key_value
-                 FROM lead.leads
-                WHERE company_id = $1 AND (metadata->>'deleted_at') IS NULL
-                  AND merged_into_lead_id IS NULL AND phone_key IS NOT NULL
-           )
-           SELECT count(*) FROM (SELECT key_value FROM k GROUP BY key_value HAVING count(*) >= 2) g"#,
-    )
-    .bind(a_co)
-    .fetch_one(&mut *tx).await.unwrap();
-    assert_eq!(groups, 1, "F-4: exactly company A's phone group");
-    tx.commit().await.unwrap();
-
-    sqlx::query("RESET ROLE").execute(&mut *conn).await.unwrap();
 }
 
 // ── MA: merge carries attribution ─────────────────────────────────────────────
@@ -662,12 +607,11 @@ async fn rls_fence_over_the_merge_columns() {
 async fn merge_carries_attribution() {
     let pool = pool().await;
     let svc = LeadWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
 
     // MA-1: bare master + attributed dupe.
-    let master = capture(&svc, company, "Lina", Some("+62 823-1"), None, None).await;
-    let dupe = capture_with_utm(&svc, company, "Lina dupe", "0823-1", Some(("google", "cpc", "spring_sale"))).await;
-    let outcome = svc.merge_leads(company, Some(master), vec![dupe]).await.unwrap();
+    let master = capture(&svc, "Lina", Some("+62 823-1"), None, None).await;
+    let dupe = capture_with_utm(&svc, "Lina dupe", "0823-1", Some(("google", "cpc", "spring_sale"))).await;
+    let outcome = svc.merge_leads(Some(master), vec![dupe]).await.unwrap();
     let row = sqlx::query(
         r#"SELECT utm_source, utm_medium, utm_campaign FROM lead.leads WHERE id=$1"#,
     )
@@ -684,9 +628,9 @@ async fn merge_carries_attribution() {
     }
 
     // MA-2: attributed master + differently-attributed dupe — the master's own values win.
-    let m2 = capture_with_utm(&svc, company, "Mira", "+62 824-1", Some(("newsletter", "email", "july_launch"))).await;
-    let d2 = capture_with_utm(&svc, company, "Mira dupe", "0824-1", Some(("google", "cpc", "spring_sale"))).await;
-    let outcome2 = svc.merge_leads(company, Some(m2), vec![d2]).await.unwrap();
+    let m2 = capture_with_utm(&svc, "Mira", "+62 824-1", Some(("newsletter", "email", "july_launch"))).await;
+    let d2 = capture_with_utm(&svc, "Mira dupe", "0824-1", Some(("google", "cpc", "spring_sale"))).await;
+    let outcome2 = svc.merge_leads(Some(m2), vec![d2]).await.unwrap();
     let row2 = sqlx::query(
         r#"SELECT utm_source, utm_medium, utm_campaign FROM lead.leads WHERE id=$1"#,
     )

@@ -12,6 +12,9 @@ use uuid::Uuid;
 /// Mint a Customer from a lead (the identity ACL — a Lead is NOT a Party).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CustomerFromLead {
+    /// Declared-only wire contract: this module never fills it. The composing service that
+    /// implements [`PartyPort`] supplies the tenant context its downstream Customer store
+    /// requires (its own scope decision, not a value the lead module carries).
     pub company_id: Uuid,
     pub lead_id: Uuid,
     pub name: String,

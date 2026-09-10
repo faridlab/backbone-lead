@@ -2,7 +2,9 @@
 //! (complements `lead_merge_routes_test.rs`, which owns the merge/dedup verbs).
 //!
 //! Runs the real router in-process via `tower::ServiceExt::oneshot` against live Postgres, with
-//! HS256 company tokens forged the way the family's guard tests do.
+//! the caller identity inserted as a request extension the way the composing service's auth
+//! stack does in production (the module itself mounts no auth middleware; the `OrgContext`
+//! extractor rejects a request without one 401).
 //!
 //! C-1  capture source vocabulary: an invalid `source` value answers the module's typed 422
 //!      (error shape + message naming the LeadSource variants), never a 500. This is the
@@ -22,39 +24,42 @@
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use serde::Serialize;
+use axum::middleware::{self, Next};
+use axum::Router;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use backbone_auth::company::CompanyVerifier;
+use backbone_auth::org::OrgContext;
 use backbone_lead::presentation::http::create_guarded_lead_routes;
 use backbone_lead::LeadModule;
 
-const SECRET: &[u8] = b"lead-capture-routes-test-secret";
-
-#[derive(Serialize)]
-struct TestClaims {
-    sub: String,
-    exp: usize,
-    company_id: Option<Uuid>,
+/// The caller identity a request carries in production (inserted by the composing service's
+/// org auth layer). The module's handlers only require its PRESENCE — the extractor rejects
+/// an unauthenticated request 401 — and derive nothing from it; the DATABASE scope is the
+/// ambient request scope the host bound.
+fn caller() -> OrgContext {
+    OrgContext {
+        acting_unit_id: Uuid::new_v4(),
+        entitled_units: vec![],
+        legacy_company_id: None,
+        user_id: "capture-routes-test-principal".to_string(),
+    }
 }
 
-/// Mint an HS256 token carrying the tenant the write must be scoped to.
-fn token(company_id: Uuid) -> String {
-    let claims = TestClaims {
-        sub: "agent-1".into(),
-        exp: 9_999_999_999,
-        company_id: Some(company_id),
-    };
-    encode(
-        &Header::new(Algorithm::HS256),
-        &claims,
-        &EncodingKey::from_secret(SECRET),
-    )
-    .unwrap()
+/// Wrap the router with the extension the host auth stack provides in production.
+fn with_caller(router: Router) -> Router {
+    let org = caller();
+    router.layer(middleware::from_fn(
+        move |mut req: axum::extract::Request, next: Next| {
+            let org = org.clone();
+            async move {
+                req.extensions_mut().insert(org);
+                next.run(req).await
+            }
+        },
+    ))
 }
 
 async fn pool() -> PgPool {
@@ -63,24 +68,25 @@ async fn pool() -> PgPool {
     PgPool::connect(&url).await.expect("connect DB")
 }
 
-async fn app() -> axum::Router {
+async fn base_router() -> axum::Router {
     let pool = pool().await;
     let module = LeadModule::builder()
         .with_database(pool.clone())
         .build()
         .unwrap();
-    create_guarded_lead_routes(&module, pool, CompanyVerifier::hs256(SECRET))
+    create_guarded_lead_routes(&module, pool)
 }
 
-fn req(method: &str, uri: &str, body: Option<Value>, bearer: Option<&str>) -> Request<Body> {
-    let mut b = Request::builder()
+async fn app() -> axum::Router {
+    with_caller(base_router().await)
+}
+
+fn req(method: &str, uri: &str, body: Option<Value>) -> Request<Body> {
+    Request::builder()
         .method(method)
         .uri(uri)
-        .header(header::CONTENT_TYPE, "application/json");
-    if let Some(t) = bearer {
-        b = b.header(header::AUTHORIZATION, format!("Bearer {t}"));
-    }
-    b.body(Body::from(body.map(|v| v.to_string()).unwrap_or_default()))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.map(|v| v.to_string()).unwrap_or_default()))
         .unwrap()
 }
 
@@ -105,13 +111,26 @@ const LEAD_SOURCE_VARIANTS: [&str; 7] = [
     "other",
 ];
 
+/// A run-unique 9-digit phone body. The duplicates scan is database-wide (the tenant fence
+/// is the composing service's decorator, absent here), so probes that assert on a group's
+/// membership derive their numbers from this instead of fixed values that would collide
+/// with rows left by a previous run on the same scratch database. A per-process counter
+/// guarantees distinct values even when consecutive calls land on the same clock tick.
+fn unique_phone_body() -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let step = SEQ.fetch_add(1, Ordering::Relaxed) as u64;
+    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let tick = (d.as_secs() << 20) ^ (d.subsec_nanos() as u64);
+    format!("9{:08}", tick.wrapping_add(step.wrapping_mul(0x9E3779B1)) % 100_000_000)
+}
+
 // ── C-1: invalid source answers the typed 422, never a 500 ────────────────────
 
 #[tokio::test]
 async fn c1_invalid_source_answers_typed_422_not_500() {
     let router = app().await;
-    let company = Uuid::new_v4();
-    let bearer = &token(company);
 
     // Every non-variant value refuses with the module's typed 422: casing garbage, a value
     // from a neighboring vocabulary (lead_status), an empty string.
@@ -122,7 +141,6 @@ async fn c1_invalid_source_answers_typed_422_not_500() {
                 "POST",
                 "/leads",
                 Some(json!({ "leadName": "C1 bad source", "phone": "+62 811-000-0001", "source": bad })),
-                Some(bearer),
             ),
         )
         .await;
@@ -153,9 +171,8 @@ async fn c1_invalid_source_answers_typed_422_not_500() {
     // Nothing was written by the refused requests.
     let pool = pool().await;
     let stored: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM lead.leads WHERE company_id=$1 AND lead_name='C1 bad source'",
+        "SELECT count(*) FROM lead.leads WHERE lead_name='C1 bad source'",
     )
-    .bind(company)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -167,8 +184,6 @@ async fn c1_invalid_source_answers_typed_422_not_500() {
 #[tokio::test]
 async fn c2_source_stored_as_sent_and_defaults_when_omitted() {
     let router = app().await;
-    let company = Uuid::new_v4();
-    let bearer = &token(company);
 
     let (status, body) = send(
         router.clone(),
@@ -176,7 +191,6 @@ async fn c2_source_stored_as_sent_and_defaults_when_omitted() {
             "POST",
             "/leads",
             Some(json!({ "leadName": "C2 referral", "phone": "+62 811-000-0002", "source": "referral" })),
-            Some(bearer),
         ),
     )
     .await;
@@ -189,7 +203,6 @@ async fn c2_source_stored_as_sent_and_defaults_when_omitted() {
             "POST",
             "/leads",
             Some(json!({ "leadName": "C2 default", "phone": "+62 811-000-0003" })),
-            Some(bearer),
         ),
     )
     .await;
@@ -221,7 +234,6 @@ async fn c2_source_stored_as_sent_and_defaults_when_omitted() {
             "POST",
             "/leads",
             Some(json!({ "leadName": "C2 livechat", "phone": "+62 811-000-0005", "source": "livechat" })),
-            Some(bearer),
         ),
     )
     .await;
@@ -241,8 +253,6 @@ async fn c2_source_stored_as_sent_and_defaults_when_omitted() {
 #[tokio::test]
 async fn c3_utm_rides_capture_and_the_read_surface() {
     let router = app().await;
-    let company = Uuid::new_v4();
-    let bearer = &token(company);
 
     let (status, body) = send(
         router.clone(),
@@ -257,7 +267,6 @@ async fn c3_utm_rides_capture_and_the_read_surface() {
                 "utmMedium": "cpc",
                 "utmCampaign": "spring_sale"
             })),
-            Some(bearer),
         ),
     )
     .await;
@@ -267,7 +276,7 @@ async fn c3_utm_rides_capture_and_the_read_surface() {
     // The generated read surface (GET /leads/:id) surfaces the stored attribution.
     let (status, body) = send(
         router.clone(),
-        req("GET", &format!("/leads/{attributed}"), None, None),
+        req("GET", &format!("/leads/{attributed}"), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -297,7 +306,6 @@ async fn c3_utm_rides_capture_and_the_read_surface() {
             "POST",
             "/leads",
             Some(json!({ "leadName": "C3 bare", "phone": "+62 811-000-0005" })),
-            Some(bearer),
         ),
     )
     .await;
@@ -305,7 +313,7 @@ async fn c3_utm_rides_capture_and_the_read_surface() {
     let bare: Uuid = serde_json::from_value(body["id"].clone()).unwrap();
     let (status, body) = send(
         router.clone(),
-        req("GET", &format!("/leads/{bare}"), None, None),
+        req("GET", &format!("/leads/{bare}"), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -323,17 +331,21 @@ async fn c3_utm_rides_capture_and_the_read_surface() {
 #[tokio::test]
 async fn c4_utm_surfaces_in_the_funnel_read() {
     let router = app().await;
-    let company = Uuid::new_v4();
-    let bearer = &token(company);
 
-    // Two captures sharing a phone key; only one carries attribution.
-    let mut attributed_body = json!({ "leadName": "C4 Andi", "phone": "+62 812-700-0001" });
+    // Two captures sharing a phone key; only one carries attribution. The formatted
+    // variants '+62 ddd ddd ddd' and '0ddddddddd' fold onto the same key; the digits are
+    // run-unique so the probe's group holds exactly this run's pair.
+    let body_digits = unique_phone_body();
+    let phone_key = format!("62{body_digits}");
+    let phone_a = format!("+62 {} {} {}", &body_digits[0..3], &body_digits[3..6], &body_digits[6..]);
+    let phone_b = format!("0{body_digits}");
+    let mut attributed_body = json!({ "leadName": "C4 Andi", "phone": phone_a });
     attributed_body["utmSource"] = json!("newsletter");
     attributed_body["utmMedium"] = json!("email");
     attributed_body["utmCampaign"] = json!("july_launch");
     let (status, body) = send(
         router.clone(),
-        req("POST", "/leads", Some(attributed_body), Some(bearer)),
+        req("POST", "/leads", Some(attributed_body)),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
@@ -343,8 +355,7 @@ async fn c4_utm_surfaces_in_the_funnel_read() {
         req(
             "POST",
             "/leads",
-            Some(json!({ "leadName": "C4 Andi dupe", "phone": "0812-700-0001" })),
-            Some(bearer),
+            Some(json!({ "leadName": "C4 Andi dupe", "phone": phone_b })),
         ),
     )
     .await;
@@ -356,7 +367,6 @@ async fn c4_utm_surfaces_in_the_funnel_read() {
             "GET",
             "/leads/duplicates-candidates?min_group_size=2&limit=50",
             None,
-            Some(bearer),
         ),
     )
     .await;
@@ -365,7 +375,7 @@ async fn c4_utm_surfaces_in_the_funnel_read() {
     let group = groups
         .iter()
         .find(|g| {
-            g["matchReason"]["keyKind"] == "phone" && g["matchReason"]["keyValue"] == "628127000001"
+            g["matchReason"]["keyKind"] == "phone" && g["matchReason"]["keyValue"] == json!(phone_key)
         })
         .expect("phone group for the captured pair");
     let members = group["members"].as_array().unwrap();
@@ -423,13 +433,11 @@ async fn c5_generic_write_surface_refuses_unknown_source() {
             "POST",
             "/leads",
             Some(json!({
-                "companyId": Uuid::new_v4(),
                 "leadName": "C5 generic",
                 "phone": "+62 811-000-0006",
                 "source": "tiktok",
                 "status": "new"
             })),
-            None,
         ),
     )
     .await;
@@ -453,7 +461,6 @@ async fn c5_generic_write_surface_refuses_unknown_source() {
             "PATCH",
             &format!("/leads/{}", Uuid::new_v4()),
             Some(json!({ "source": "tiktok" })),
-            None,
         ),
     )
     .await;
@@ -467,14 +474,12 @@ async fn c5_generic_write_surface_refuses_unknown_source() {
     // case is an EXISTING row: the patch must still refuse the unknown source client-side,
     // never reach the DB enum cast, and never answer a 500.
     let guarded = app().await;
-    let company = Uuid::new_v4();
     let (status, body) = send(
         guarded,
         req(
             "POST",
             "/leads",
             Some(json!({ "leadName": "C5 patch target", "phone": "+62 811-000-0007" })),
-            Some(&token(company)),
         ),
     )
     .await;
@@ -486,7 +491,6 @@ async fn c5_generic_write_surface_refuses_unknown_source() {
             "PATCH",
             &format!("/leads/{target}"),
             Some(json!({ "source": "tiktok" })),
-            None,
         ),
     )
     .await;
@@ -511,7 +515,6 @@ async fn c5_generic_write_surface_refuses_unknown_source() {
             "PATCH",
             "/leads/bulk",
             Some(json!({ "ids": [target], "patch": { "source": "tiktok" } })),
-            None,
         ),
     )
     .await;

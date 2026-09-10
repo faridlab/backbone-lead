@@ -8,8 +8,9 @@
 //! intake — match, lead insert, link — commits as ONE transaction
 //! (the caller is the website module's intake engine; its savepoint
 //! wraps all three statements). The caller has already bound the
-//! company scope on the connection (RLS LAW): an unscoped connection
-//! sees zero rows and writes nothing.
+//! composing service's org scope on the connection (RLS LAW): an
+//! unscoped connection sees zero rows and writes nothing under a
+//! decorator-installed fence.
 //!
 //! The website visitor id and website id are PLAIN UUIDS with no DB
 //! foreign key — the cross-module promotion contract. backbone-website
@@ -46,16 +47,14 @@ pub struct WebsiteCaptureMatch {
 /// Same INSERT text as [`super::lead_repository::LeadRepository::insert_lead`]
 /// (the shared `LEAD_INSERT_SQL` const keeps the two in lockstep — a
 /// column added to one without the other fails to compile). The caller
-/// has bound the company scope; the `company_id` bind stays as
-/// defense-in-depth. The id is the caller's (minted before the insert so
-/// the attribution link can reference it).
+/// has bound the composing service's org scope. The id is the caller's
+/// (minted before the insert so the attribution link can reference it).
 pub async fn insert_lead_on_conn(
     conn: &mut sqlx::PgConnection,
     l: &NewLeadRow<'_>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(LEAD_INSERT_SQL)
         .bind(l.id)
-        .bind(l.company_id)
         .bind(l.lead_name)
         .bind(l.organization_name)
         .bind(l.phone)
@@ -90,7 +89,6 @@ pub async fn insert_lead_on_conn(
 /// exactly this arm; the port refuses the silence).
 pub async fn find_capture_match_on_conn(
     conn: &mut sqlx::PgConnection,
-    company_id: Uuid,
     email: Option<&str>,
     phone: Option<&str>,
 ) -> Result<Option<WebsiteCaptureMatch>, sqlx::Error> {
@@ -122,8 +120,8 @@ pub async fn find_capture_match_on_conn(
             r#"
             WITH q AS (
                 SELECT
-                    NULLIF(btrim(lower($2::text)), '') AS email_key,
-                    NULLIF($3::text, '')              AS phone_key
+                    NULLIF(btrim(lower($1::text)), '') AS email_key,
+                    NULLIF($2::text, '')              AS phone_key
             )
             SELECT l.id, l.lead_name, l.email, l.phone,
                    CASE WHEN q.phone_key IS NOT NULL
@@ -132,8 +130,7 @@ pub async fn find_capture_match_on_conn(
                        AND l.phone_key IS NOT NULL
                        AND l.phone_key <> q.phone_key
               FROM lead.leads l, q
-             WHERE l.company_id = $1
-               AND (l.metadata->>'deleted_at') IS NULL
+             WHERE (l.metadata->>'deleted_at') IS NULL
                AND l.merged_into_lead_id IS NULL
                AND (
                      (q.email_key  IS NOT NULL AND l.email_key  = q.email_key)
@@ -145,7 +142,6 @@ pub async fn find_capture_match_on_conn(
              LIMIT 1
             "#,
         )
-        .bind(company_id)
         .bind(email_key.unwrap_or_default())
         .bind(phone_key.filter(|k| !k.is_empty()).unwrap_or_default())
         .fetch_optional(&mut *conn)
@@ -170,7 +166,6 @@ pub async fn find_capture_match_on_conn(
 /// the visitor row; this row is the durable attribution record.
 pub async fn link_website_visitor_on_conn(
     conn: &mut sqlx::PgConnection,
-    company_id: Uuid,
     lead_id: Uuid,
     website_id: Uuid,
     website_visitor_id: Uuid,
@@ -178,12 +173,11 @@ pub async fn link_website_visitor_on_conn(
     sqlx::query(
         r#"
         INSERT INTO lead.lead_website_visitors
-            (id, company_id, lead_id, website_id, website_visitor_id, linked_at)
-        VALUES (gen_random_uuid(), $1, $2, $3, $4, now())
+            (id, lead_id, website_id, website_visitor_id, linked_at)
+        VALUES (gen_random_uuid(), $1, $2, $3, now())
         ON CONFLICT (lead_id, website_visitor_id) DO NOTHING
         "#,
     )
-    .bind(company_id)
     .bind(lead_id)
     .bind(website_id)
     .bind(website_visitor_id)
@@ -198,7 +192,6 @@ pub async fn link_website_visitor_on_conn(
 /// leads (the lead rows are the record of truth).
 pub async fn leads_for_visitor_on_conn(
     conn: &mut sqlx::PgConnection,
-    company_id: Uuid,
     website_id: Uuid,
     website_visitor_id: Uuid,
     limit: i64,
@@ -208,15 +201,13 @@ pub async fn leads_for_visitor_on_conn(
         SELECT l.id, l.lead_name
           FROM lead.lead_website_visitors v
           JOIN lead.leads l ON l.id = v.lead_id
-         WHERE v.company_id = $1
-           AND v.website_id = $2
-           AND v.website_visitor_id = $3
+         WHERE v.website_id = $1
+           AND v.website_visitor_id = $2
            AND (l.metadata->>'deleted_at') IS NULL
          ORDER BY v.linked_at DESC, l.id
-         LIMIT $4
+         LIMIT $3
         "#,
     )
-    .bind(company_id)
     .bind(website_id)
     .bind(website_visitor_id)
     .bind(limit)

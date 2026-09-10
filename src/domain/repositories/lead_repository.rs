@@ -44,7 +44,6 @@ pub struct LeadPaginatedResult {
 /// Filter parameters for list queries
 #[derive(Debug, Clone, Default)]
 pub struct LeadFilter {
-    pub company_id: Option<Uuid>,
     pub lead_name: Option<String>,
     pub organization_name: Option<String>,
     pub phone: Option<String>,
@@ -66,7 +65,7 @@ pub struct LeadFilter {
 impl LeadFilter {
     /// Check if any filter is set
     pub fn has_filters(&self) -> bool {
-        self.company_id.is_some() || self.lead_name.is_some() || self.organization_name.is_some() || self.phone.is_some() || self.whatsapp_no.is_some() || self.email.is_some() || self.source.is_some() || self.campaign_id.is_some() || self.status.is_some() || self.party_id.is_some() || self.notes.is_some() || self.owner_user_id.is_some() || self.sales_team_id.is_some() || self.utm_source.is_some() || self.utm_medium.is_some() || self.utm_campaign.is_some() || self.merged_into_lead_id.is_some()
+        self.lead_name.is_some() || self.organization_name.is_some() || self.phone.is_some() || self.whatsapp_no.is_some() || self.email.is_some() || self.source.is_some() || self.campaign_id.is_some() || self.status.is_some() || self.party_id.is_some() || self.notes.is_some() || self.owner_user_id.is_some() || self.sales_team_id.is_some() || self.utm_source.is_some() || self.utm_medium.is_some() || self.utm_campaign.is_some() || self.merged_into_lead_id.is_some()
     }
 }
 

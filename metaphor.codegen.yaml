@@ -60,6 +60,15 @@ user_owned:
   - "migrations/20260906130000_lead_source_livechat.up.sql"
   - "migrations/20260906130000_lead_source_livechat.down.sql"
 
+  # Hand-authored tenancy strip (ADR-0029): drops the company_id column, the
+  # company-leading indexes, and the <table>_company_isolation RLS policies from
+  # leads and lead_website_visitors; re-declares the dedup match-key indexes
+  # tenant-free. The module ships no tenancy — org scoping is installed by the
+  # composing service's tenancy decorator at composition time. Down is a documented
+  # restore sketch, not a usable rollback (post-strip rows have no company_id).
+  - "migrations/20260910120000_strip_tenancy.up.sql"
+  - "migrations/20260910120000_strip_tenancy.down.sql"
+
   # ⚠ GENERATOR-DRIFT FREEZE (whole tree, pinned generator only): running
   # `metaphor schema generate --force` with the pinned CLI rewrote 209 files of
   # the livechat module (-3.7k lines against its checked-in generated state) —

@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use backbone_orm::company_scope;
+use backbone_orm::org_scope;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -74,7 +74,6 @@ impl LeadError {
 }
 
 pub struct NewLead {
-    pub company_id: Uuid,
     pub lead_name: String,
     pub organization_name: Option<String>,
     pub phone: Option<String>,
@@ -126,32 +125,29 @@ impl LeadWriteService {
                 "source '{bad}' is not a known lead source; must be one of: {LEAD_SOURCE_VOCABULARY}"
             )));
         }
-        // RLS scope (ADR-0008): company on the DTO — bind it for the body so the insert passes the
-        // WITH CHECK fence. The explicit `company_id` bind stays as defense-in-depth.
-        let company = l.company_id;
-        company_scope::with_company_scope(Some(company), async move {
-            let id = Uuid::new_v4();
-            self.leads
-                .insert_lead(&self.pool, &NewLeadRow {
-                    id,
-                    company_id: l.company_id,
-                    lead_name: &l.lead_name,
-                    organization_name: l.organization_name.as_deref(),
-                    phone: l.phone.as_deref(),
-                    whatsapp_no: l.whatsapp_no.as_deref(),
-                    email: l.email.as_deref(),
-                    source: &l.source,
-                    campaign_id: l.campaign_id,
-                    notes: l.notes.as_deref(),
-                    owner_user_id: l.owner_user_id,
-                    sales_team_id: l.sales_team_id,
-                    utm_source: l.utm_source.as_deref(),
-                    utm_medium: l.utm_medium.as_deref(),
-                    utm_campaign: l.utm_campaign.as_deref(),
-                })
-                .await?;
-            Ok(id)
-        })
-        .await
+        // Tenancy (ADR-0029): no tenant value on the DTO. The insert runs through
+        // `org_scope::execute_scoped`, which rides the request-dedicated connection the
+        // composing service bound (`with_org_request_scope`) — under a decorator-installed
+        // fence the row-level WITH CHECK applies; an unfenced deployment inserts plain.
+        let id = Uuid::new_v4();
+        self.leads
+            .insert_lead(&self.pool, &NewLeadRow {
+                id,
+                lead_name: &l.lead_name,
+                organization_name: l.organization_name.as_deref(),
+                phone: l.phone.as_deref(),
+                whatsapp_no: l.whatsapp_no.as_deref(),
+                email: l.email.as_deref(),
+                source: &l.source,
+                campaign_id: l.campaign_id,
+                notes: l.notes.as_deref(),
+                owner_user_id: l.owner_user_id,
+                sales_team_id: l.sales_team_id,
+                utm_source: l.utm_source.as_deref(),
+                utm_medium: l.utm_medium.as_deref(),
+                utm_campaign: l.utm_campaign.as_deref(),
+            })
+            .await?;
+        Ok(id)
     }
 }

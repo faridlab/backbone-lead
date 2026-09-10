@@ -26,6 +26,12 @@
 # (phone_key / whatsapp_key / email_key / org_key) are DB-level generated
 # columns declared in the reshape migration, not here — they are indexing
 # detail, same tier as RLS policies and audit triggers.
+#
+# Tenancy: none, by design (ADR-0029). The module is tenant-agnostic and reusable —
+# it ships no scoping column and no fence declaration. A composing backend-service
+# that wants these tables org-scoped declares them in its tenancy.yaml; the
+# decorator installs org_unit_id, the RLS policy, the kind guard, and per-unit
+# uniques at composition time.
 # =============================================================================
 
 models:
@@ -37,10 +43,6 @@ models:
         type: uuid
         attributes: ["@id", "@default(uuid)"]
         description: "Unique lead id"
-      company_id:
-        type: uuid
-        attributes: ["@required", "@exclude_from_foreign_key_check"]
-        description: "Org owner # logical FK to organization.Company.id"
       lead_name:
         type: string
         attributes: ["@required", "@max(140)"]
@@ -124,17 +126,9 @@ models:
         description: "Audit metadata"
     indexes:
       - type: index
-        fields: [company_id, status]
-      - type: index
-        fields: [company_id, whatsapp_no]
-      - type: index
         fields: [party_id]
       - type: index
         fields: [campaign_id]
-      - type: index
-        fields: [company_id, owner_user_id]
-      - type: index
-        fields: [company_id, sales_team_id]
       - type: index
         fields: [merged_into_lead_id]
 

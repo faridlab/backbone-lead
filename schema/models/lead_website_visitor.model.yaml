@@ -16,16 +16,22 @@
 #
 # PII posture (deliberate): NO lead contact field is ever copied onto a
 # website-visible row through this link. The lead's email/phone stay in
-# lead.leads behind the company fence; the visitor row remains the
-# digest-only analytics grain backbone-website defines. Consequence for
-# downstream consumers: any per-visitor messaging surface must target the
-# LEAD's own contact columns — there is no visitor-held email/mobile to
-# compare against.
+# lead.leads (readable only through the composing service's access fences);
+# the visitor row remains the digest-only analytics grain backbone-website
+# defines. Consequence for downstream consumers: any per-visitor messaging
+# surface must target the LEAD's own contact columns — there is no
+# visitor-held email/mobile to compare against.
 #
 # lead_id is the one real (same-schema) foreign key: links die with their
 # lead on hard delete. The unique (lead_id, website_visitor_id) pair makes
 # re-linking idempotent — the same visitor re-submitting the same lead path
 # never mints duplicate rows.
+#
+# Tenancy: none, by design (ADR-0029). The module is tenant-agnostic and reusable —
+# it ships no scoping column and no fence declaration. A composing backend-service
+# that wants these tables org-scoped declares them in its tenancy.yaml; the
+# decorator installs org_unit_id, the RLS policy, the kind guard, and per-unit
+# uniques at composition time.
 # =============================================================================
 
 models:
@@ -37,10 +43,6 @@ models:
         type: uuid
         attributes: ["@id", "@default(uuid)"]
         description: "Unique link id"
-      company_id:
-        type: uuid
-        attributes: ["@required", "@exclude_from_foreign_key_check"]
-        description: "Org owner # logical FK to organization.Company.id (the company fence — same posture as lead.leads)"
       lead_id:
         type: uuid
         attributes: ["@required", "@indexed", "@foreign_key(Lead.leads)"]
@@ -68,6 +70,3 @@ models:
       - type: index
         fields: [website_id, website_visitor_id]
         description: "The reverse read: every lead a visitor produced (visitor-side analytics)"
-      - type: index
-        fields: [company_id]
-        description: "The company fence's own scan path"

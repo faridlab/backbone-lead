@@ -6,9 +6,21 @@
 //! overwriting `party_id`, or un-absorbing a merged dupe by nulling `merged_into_lead_id`).
 //! The generic write surface is NOT mounted.
 //!
+//! # How a request is scoped
+//!
+//! Tenancy (ADR-0029): the module is tenant-agnostic — it extracts no tenant identity from
+//! the token and installs no fence. Each handler extracts [`OrgContext`] (from
+//! `backbone_auth::org`, inserted by the composing service's org auth layer over a signed
+//! Bearer token) so an unauthenticated request is rejected 401 by the extractor, and never
+//! names a tenant itself: the org identity used by the DATABASE is the ambient request scope
+//! the composing service bound (`with_org_request_scope`). The write service relays that
+//! scope onto its transactions via `backbone_orm::org_scope::bind_org_scope_on`; row
+//! visibility comes from the decorator's row-level-security policy, not from application
+//! filtering. The host also owns mounting the auth layer — this router mounts none.
+//!
 //! Verbs:
-//! - `POST /leads`                     — validated capture (tenant from the token, never the body);
-//! - `GET  /leads/duplicates-candidates` — the duplicate scan (same tenant);
+//! - `POST /leads`                     — validated capture (identity from the ambient scope, never the body);
+//! - `GET  /leads/duplicates-candidates` — the duplicate scan (within the caller's scope);
 //! - `POST /leads/:id/merge`           — pinned merge: the path lead is (or redirects to) the master,
 //!                                        body carries 1..=5 absorb ids;
 //! - `POST /leads/merge`               — auto merge: the confidence order picks the master over
@@ -27,12 +39,11 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    middleware::from_fn_with_state,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
-use backbone_auth::company::{company_auth, CompanyContext, CompanyVerifier};
+use backbone_auth::org::OrgContext;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -65,8 +76,8 @@ fn err_response(e: LeadError) -> axum::response::Response {
 #[serde(rename_all = "camelCase")]
 struct CaptureLeadBody {
     lead_name: String,
-    // No `company_id`: the tenant comes from the signed token (`CompanyContext`), never the
-    // body — a client must not be able to name the tenant it writes into.
+    // No tenant field: the acting org comes from the ambient request scope the composing
+    // service bound — a client must not be able to name the tenant it writes into.
     #[serde(default)]
     organization_name: Option<String>,
     #[serde(default)]
@@ -97,11 +108,10 @@ struct CaptureLeadBody {
 }
 async fn capture_lead(
     State(svc): State<Arc<LeadWriteService>>,
-    tenant: CompanyContext,
+    _org: OrgContext,
     Json(b): Json<CaptureLeadBody>,
 ) -> axum::response::Response {
     let lead = NewLead {
-        company_id: tenant.company_id,
         lead_name: b.lead_name,
         organization_name: b.organization_name,
         phone: b.phone,
@@ -129,7 +139,7 @@ async fn capture_lead(
 type RawQuery = HashMap<String, String>;
 async fn duplicates_candidates(
     State(svc): State<Arc<LeadWriteService>>,
-    tenant: CompanyContext,
+    _org: OrgContext,
     Query(q): Query<RawQuery>,
 ) -> axum::response::Response {
     let min = match q.get("min_group_size").map(|v| v.parse::<i64>()) {
@@ -142,7 +152,7 @@ async fn duplicates_candidates(
         Some(Ok(v)) => v,
         Some(Err(_)) => return err_response(LeadError::Invalid("limit must be an integer".into())),
     };
-    match svc.duplicate_candidate_groups(tenant.company_id, min, limit).await {
+    match svc.duplicate_candidate_groups(min, limit).await {
         Ok(groups) => {
             #[derive(Serialize)]
             #[serde(rename_all = "camelCase")]
@@ -189,11 +199,11 @@ struct MergePinnedBody {
 }
 async fn merge_pinned(
     State(svc): State<Arc<LeadWriteService>>,
-    tenant: CompanyContext,
+    _org: OrgContext,
     Path(id): Path<Uuid>,
     Json(b): Json<MergePinnedBody>,
 ) -> axum::response::Response {
-    match svc.merge_leads(tenant.company_id, Some(id), b.absorb_ids).await {
+    match svc.merge_leads(Some(id), b.absorb_ids).await {
         Ok(outcome) => (StatusCode::OK, Json(merge_body(&outcome))).into_response(),
         Err(e) => err_response(e),
     }
@@ -206,10 +216,10 @@ struct MergeAutoBody {
 }
 async fn merge_auto(
     State(svc): State<Arc<LeadWriteService>>,
-    tenant: CompanyContext,
+    _org: OrgContext,
     Json(b): Json<MergeAutoBody>,
 ) -> axum::response::Response {
-    match svc.merge_leads(tenant.company_id, None, b.lead_ids).await {
+    match svc.merge_leads(None, b.lead_ids).await {
         Ok(outcome) => (StatusCode::OK, Json(merge_body(&outcome))).into_response(),
         Err(e) => err_response(e),
     }
@@ -236,30 +246,26 @@ fn merge_body(outcome: &MergeOutcome) -> impl Serialize + '_ {
 
 // ── composition ───────────────────────────────────────────────────────────────
 
-fn create_lead_write_routes(svc: Arc<LeadWriteService>, verifier: CompanyVerifier) -> Router {
+fn create_lead_write_routes(svc: Arc<LeadWriteService>) -> Router {
     Router::new()
         .route("/leads", post(capture_lead))
         .route("/leads/duplicates-candidates", get(duplicates_candidates))
         .route("/leads/merge", post(merge_auto))
         .route("/leads/:id/merge", post(merge_pinned))
-        // Every route above is tenant-scoped: `company_auth` rejects a request whose token is
-        // absent, invalid, or carries no `company_id`, so a handler only ever runs with a proven
-        // tenant — and the RLS fence scopes every statement to it.
-        //
-        // `route_layer`, not `layer`: `layer` would also wrap this router's fallback, so once
-        // merged every *unmatched* path (e.g. the generic CRUD paths this surface deliberately
-        // does not mount) would answer 401 instead of 404 — leaking "auth required" for routes
-        // that do not exist, and masking the CRUD-bypass probes.
-        .route_layer(from_fn_with_state(verifier, company_auth))
+        // Tenancy (ADR-0029): no auth middleware is mounted here. The composing service
+        // layers its org auth (which inserts `OrgContext` and binds the ambient request
+        // scope) OVER this router; the `OrgContext` extractor on every handler rejects an
+        // unauthenticated request 401, and the decorator's row-level-security policy scopes
+        // every statement. Mount this router, then apply the host auth layer.
         .with_state(svc)
 }
 
-/// Mount the lead module: the generated read surface + validated, tenant-scoped capture and
+/// Mount the lead module: the generated read surface + validated, in-scope capture and
 /// merge verbs. Generic mutation is not mounted. **Prefer this over `LeadModule::all_crud_routes()`
 /// for any real deployment.** Merge events go to the logging sink; use
 /// [`create_guarded_lead_routes_with_sink`] to publish `LeadMerged` through a real sink.
-pub fn create_guarded_lead_routes(m: &LeadModule, pool: PgPool, verifier: CompanyVerifier) -> Router {
-    create_guarded_lead_routes_with_sink(m, pool, verifier, Arc::new(LoggingLeadSink))
+pub fn create_guarded_lead_routes(m: &LeadModule, pool: PgPool) -> Router {
+    create_guarded_lead_routes_with_sink(m, pool, Arc::new(LoggingLeadSink))
 }
 
 /// [`create_guarded_lead_routes`] with the write service's event sink supplied by the composer
@@ -267,11 +273,10 @@ pub fn create_guarded_lead_routes(m: &LeadModule, pool: PgPool, verifier: Compan
 pub fn create_guarded_lead_routes_with_sink(
     m: &LeadModule,
     pool: PgPool,
-    verifier: CompanyVerifier,
     sink: Arc<dyn LeadEventSink>,
 ) -> Router {
     let write = Arc::new(LeadWriteService::with_sink(pool, sink));
     Router::new()
         .merge(create_lead_read_routes(m.lead_service.clone()))
-        .merge(create_lead_write_routes(write, verifier))
+        .merge(create_lead_write_routes(write))
 }

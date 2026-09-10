@@ -56,6 +56,10 @@ thiserror = "1.0"
 config = "0.14"
 serde_yaml = "0.9"
 
+# OpenAPI schema derive. The schema generator emits ungated `use utoipa::ToSchema;`
+# imports in every entity and DTO file, so the dependency must be unconditional.
+utoipa = { version = "5", features = ["chrono", "uuid"] }
+
 # Protocol Buffers (Generated from Schema-First YAML)
 tonic = "0.12"
 prost = "0.13"

@@ -51,7 +51,6 @@ impl std::ops::Deref for LeadId {
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Lead {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub lead_name: String,
     pub organization_name: Option<String>,
     pub phone: Option<String>,
@@ -82,10 +81,9 @@ impl Lead {
     }
 
     /// Create a new Lead with required fields
-    pub fn new(company_id: Uuid, lead_name: String, source: LeadSource, status: LeadStatus) -> Self {
+    pub fn new(lead_name: String, source: LeadSource, status: LeadStatus) -> Self {
         Self {
             id: Uuid::new_v4(),
-            company_id,
             lead_name,
             organization_name: None,
             phone: None,
@@ -266,9 +264,6 @@ impl Lead {
     pub fn apply_patch(&mut self, fields: std::collections::HashMap<String, serde_json::Value>) {
         for (key, value) in fields {
             match key.as_str() {
-                "company_id" => {
-                    if let Ok(v) = serde_json::from_value(value) { self.company_id = v; }
-                }
                 "lead_name" => {
                     if let Ok(v) = serde_json::from_value(value) { self.lead_name = v; }
                 }
@@ -377,7 +372,6 @@ impl backbone_orm::EntityRepoMeta for Lead {
     fn column_types() -> std::collections::HashMap<String, String> {
         let mut m = std::collections::HashMap::new();
         m.insert("id".to_string(), "uuid".to_string());
-        m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("campaign_id".to_string(), "uuid".to_string());
         m.insert("party_id".to_string(), "uuid".to_string());
         m.insert("owner_user_id".to_string(), "uuid".to_string());
@@ -390,9 +384,6 @@ impl backbone_orm::EntityRepoMeta for Lead {
     fn search_fields() -> &'static [&'static str] {
         &["lead_name"]
     }
-    fn company_field() -> Option<&'static str> {
-        Some("company_id")
-    }
 }
 
 /// Builder for Lead entity
@@ -401,7 +392,6 @@ impl backbone_orm::EntityRepoMeta for Lead {
 /// System fields (id, metadata, timestamps) are auto-initialized.
 #[derive(Debug, Clone, Default)]
 pub struct LeadBuilder {
-    company_id: Option<Uuid>,
     lead_name: Option<String>,
     organization_name: Option<String>,
     phone: Option<String>,
@@ -423,12 +413,6 @@ pub struct LeadBuilder {
 }
 
 impl LeadBuilder {
-    /// Set the company_id field (required)
-    pub fn company_id(mut self, value: Uuid) -> Self {
-        self.company_id = Some(value);
-        self
-    }
-
     /// Set the lead_name field (required)
     pub fn lead_name(mut self, value: String) -> Self {
         self.lead_name = Some(value);
@@ -541,12 +525,10 @@ impl LeadBuilder {
     ///
     /// Returns Err if any required field without a default is missing.
     pub fn build(self) -> Result<Lead, String> {
-        let company_id = self.company_id.ok_or_else(|| "company_id is required".to_string())?;
         let lead_name = self.lead_name.ok_or_else(|| "lead_name is required".to_string())?;
 
         Ok(Lead {
             id: Uuid::new_v4(),
-            company_id,
             lead_name,
             organization_name: self.organization_name,
             phone: self.phone,
