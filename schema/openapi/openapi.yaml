@@ -7,15 +7,17 @@ info:
     This API provides 11 standard CRUD endpoints for each model.
 
 servers:
-  - url: http://localhost:3000
+  - url: /
     description: Development server
 
 tags:
   - name: Leads
     description: Lead management endpoints
+  - name: LeadWebsiteVisitors
+    description: LeadWebsiteVisitor management endpoints
 
 paths:
-  /api/v1/leads:
+  /api/v1/lead/leads:
     get:
       tags:
         - Leads
@@ -61,7 +63,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /api/v1/leads/{id}:
+  /api/v1/lead/leads/{id}:
     parameters:
       - $ref: '#/components/parameters/IdParam'
 
@@ -133,7 +135,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /api/v1/leads/bulk:
+  /api/v1/lead/leads/bulk:
     post:
       tags:
         - Leads
@@ -225,7 +227,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
-  /api/v1/leads/upsert:
+  /api/v1/lead/leads/upsert:
     post:
       tags:
         - Leads
@@ -255,7 +257,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Lead'
 
-  /api/v1/leads/trash:
+  /api/v1/lead/leads/trash:
     get:
       tags:
         - Leads
@@ -272,7 +274,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/LeadList'
 
-  /api/v1/leads/{id}/restore:
+  /api/v1/lead/leads/{id}/restore:
     parameters:
       - $ref: '#/components/parameters/IdParam'
     post:
@@ -290,7 +292,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /api/v1/leads/empty:
+  /api/v1/lead/leads/empty:
     delete:
       tags:
         - Leads
@@ -307,7 +309,7 @@ paths:
                   deleted_count:
                     type: integer
 
-  /api/v1/leads/delete/bulk:
+  /api/v1/lead/leads/delete/bulk:
     post:
       tags:
         - Leads
@@ -327,7 +329,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
-  /api/v1/leads/restore/bulk:
+  /api/v1/lead/leads/restore/bulk:
     post:
       tags:
         - Leads
@@ -345,7 +347,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
-  /api/v1/leads/restore/all:
+  /api/v1/lead/leads/restore/all:
     post:
       tags:
         - Leads
@@ -361,12 +363,378 @@ paths:
                 properties:
                   restored: { type: integer }
 
-  /api/v1/leads/trash/bulk:
+  /api/v1/lead/leads/trash/bulk:
     delete:
       tags:
         - Leads
       summary: Bulk permanently-delete Leads from trash by ids (atomic)
       operationId: bulkPermanentDeleteLeads
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Permanently deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permanently_deleted: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/lead/lead_website_visitors:
+    get:
+      tags:
+        - LeadWebsiteVisitors
+      summary: List LeadWebsiteVisitors
+      description: Get a paginated list of LeadWebsiteVisitors with optional filtering and sorting
+      operationId: listLeadWebsiteVisitors
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitorList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Create LeadWebsiteVisitor
+      description: Create a new LeadWebsiteVisitor
+      operationId: createLeadWebsiteVisitor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLeadWebsiteVisitorRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitor'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/lead/lead_website_visitors/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+
+    get:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Get LeadWebsiteVisitor by ID
+      operationId: getLeadWebsiteVisitor
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitor'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Update LeadWebsiteVisitor (full)
+      operationId: updateLeadWebsiteVisitor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLeadWebsiteVisitorRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitor'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Update LeadWebsiteVisitor (partial)
+      operationId: patchLeadWebsiteVisitor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchLeadWebsiteVisitorRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitor'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Delete LeadWebsiteVisitor (soft)
+      operationId: deleteLeadWebsiteVisitor
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/lead/lead_website_visitors/bulk:
+    post:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Bulk create LeadWebsiteVisitors
+      operationId: bulkCreateLeadWebsiteVisitors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/CreateLeadWebsiteVisitorRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LeadWebsiteVisitor'
+    put:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Bulk update LeadWebsiteVisitors (full, atomic)
+      operationId: bulkUpdateLeadWebsiteVisitors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                allOf:
+                  - type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                  - $ref: '#/components/schemas/UpdateLeadWebsiteVisitorRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitorBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    patch:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Bulk partial-update LeadWebsiteVisitors (atomic)
+      operationId: bulkPatchLeadWebsiteVisitors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [ids, patch]
+                  properties:
+                    ids:
+                      type: array
+                      items: { type: string }
+                    patch:
+                      type: object
+                      additionalProperties: true
+                - type: object
+                  required: [items]
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        type: object
+                        required: [id, patch]
+                        properties:
+                          id: { type: string }
+                          patch: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitorBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/lead/lead_website_visitors/upsert:
+    post:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Upsert LeadWebsiteVisitor
+      operationId: upsertLeadWebsiteVisitor
+      parameters:
+        - name: key_field
+          in: query
+          schema:
+            type: string
+        - name: key_value
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLeadWebsiteVisitorRequest'
+      responses:
+        '200':
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitor'
+
+  /api/v1/lead/lead_website_visitors/trash:
+    get:
+      tags:
+        - LeadWebsiteVisitors
+      summary: List deleted LeadWebsiteVisitors
+      operationId: listDeletedLeadWebsiteVisitors
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitorList'
+
+  /api/v1/lead/lead_website_visitors/{id}/restore:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    post:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Restore deleted LeadWebsiteVisitor
+      operationId: restoreLeadWebsiteVisitor
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitor'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/lead/lead_website_visitors/empty:
+    delete:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Empty trash for LeadWebsiteVisitors
+      operationId: emptyTrashLeadWebsiteVisitors
+      responses:
+        '200':
+          description: Trash emptied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted_count:
+                    type: integer
+
+  /api/v1/lead/lead_website_visitors/delete/bulk:
+    post:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Bulk soft-delete LeadWebsiteVisitors by ids (atomic)
+      operationId: bulkDeleteLeadWebsiteVisitors
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Soft-deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  soft_deleted: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/lead/lead_website_visitors/restore/bulk:
+    post:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Bulk restore LeadWebsiteVisitors by ids (atomic)
+      operationId: bulkRestoreLeadWebsiteVisitors
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWebsiteVisitorBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/lead/lead_website_visitors/restore/all:
+    post:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Restore all soft-deleted LeadWebsiteVisitors
+      operationId: restoreAllLeadWebsiteVisitors
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restored: { type: integer }
+
+  /api/v1/lead/lead_website_visitors/trash/bulk:
+    delete:
+      tags:
+        - LeadWebsiteVisitors
+      summary: Bulk permanently-delete LeadWebsiteVisitors from trash by ids (atomic)
+      operationId: bulkPermanentDeleteLeadWebsiteVisitors
       requestBody:
         $ref: '#/components/requestBodies/BatchIds'
       responses:
@@ -714,6 +1082,123 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Lead'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    LeadWebsiteVisitor:
+      type: object
+      required:
+        - id
+        - lead_id
+        - website_id
+        - website_visitor_id
+        - linked_at
+        - metadata
+      properties:
+        id:
+          type: string
+          format: uuid
+        lead_id:
+          type: string
+          format: uuid
+        website_id:
+          type: string
+          format: uuid
+        website_visitor_id:
+          type: string
+          format: uuid
+        linked_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+
+    LeadWebsiteVisitorBulkResult:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LeadWebsiteVisitor'
+        total: { type: integer }
+        failed: { type: integer }
+        errors:
+          type: array
+          items: { type: string }
+
+    CreateLeadWebsiteVisitorRequest:
+      type: object
+      required:
+        - lead_id
+        - website_id
+        - website_visitor_id
+        - linked_at
+        - metadata
+      properties:
+        lead_id:
+          type: string
+          format: uuid
+        website_id:
+          type: string
+          format: uuid
+        website_visitor_id:
+          type: string
+          format: uuid
+        linked_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+
+    UpdateLeadWebsiteVisitorRequest:
+      type: object
+      required:
+        - lead_id
+        - website_id
+        - website_visitor_id
+        - linked_at
+        - metadata
+      properties:
+        lead_id:
+          type: string
+          format: uuid
+        website_id:
+          type: string
+          format: uuid
+        website_visitor_id:
+          type: string
+          format: uuid
+        linked_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+
+    PatchLeadWebsiteVisitorRequest:
+      type: object
+      properties:
+        lead_id:
+          type: string
+          format: uuid
+        website_id:
+          type: string
+          format: uuid
+        website_visitor_id:
+          type: string
+          format: uuid
+        linked_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+
+    LeadWebsiteVisitorList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LeadWebsiteVisitor'
         meta:
           $ref: '#/components/schemas/PaginationMeta'
 
