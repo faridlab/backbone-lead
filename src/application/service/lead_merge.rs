@@ -183,7 +183,7 @@ impl LeadWriteService {
         }
         let scanned = self
             .leads
-            .find_duplicate_key_groups(&self.pool, min_group_size, limit)
+            .find_duplicate_key_groups(&self.rpool(), min_group_size, limit)
             .await?;
         let mut groups = Vec::with_capacity(scanned.len());
         for g in scanned {
@@ -262,7 +262,7 @@ impl LeadWriteService {
                 fetch_ids.push(m);
             }
         }
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         // Tenancy (ADR-0029): relay the composing service's ambient request org scope so the
         // decorator's row-level fence applies to every statement of this transaction. An
         // unfenced deployment runs the transaction plain.

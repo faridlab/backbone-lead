@@ -111,6 +111,14 @@ impl LeadWriteService {
         Self { pool, leads, sink }
     }
 
+    /// The database this call runs on: the composer's request pool when one
+    /// is bound (a tenant mount, or a relay consumer wrapped by the host),
+    /// else the composed pool (ADR-0029 pool law). Visible to the sibling
+    /// merge impl over these same types.
+    pub(super) fn rpool(&self) -> PgPool {
+        crate::request_pool::current().unwrap_or_else(|| self.pool.clone())
+    }
+
     /// Capture a lead (WhatsApp-first). At least one contact channel is required.
     pub async fn create_lead(&self, l: NewLead) -> Result<Uuid, LeadError> {
         if l.whatsapp_no.is_none() && l.phone.is_none() && l.email.is_none() {
@@ -131,7 +139,7 @@ impl LeadWriteService {
         // fence the row-level WITH CHECK applies; an unfenced deployment inserts plain.
         let id = Uuid::new_v4();
         self.leads
-            .insert_lead(&self.pool, &NewLeadRow {
+            .insert_lead(&self.rpool(), &NewLeadRow {
                 id,
                 lead_name: &l.lead_name,
                 organization_name: l.organization_name.as_deref(),

@@ -279,4 +279,12 @@ pub fn create_guarded_lead_routes_with_sink(
     Router::new()
         .merge(create_lead_read_routes(m.lead_service.clone()))
         .merge(create_lead_write_routes(write))
+
+        // Bind the composer's request pool (ADR-0029 pool law) for the verbs:
+        // under a tenant mount the writes go to the tenant's database; without
+        // one the composed pool stays the fallback. Applied AFTER the routes —
+        // a Router layer only wraps what was registered before the call.
+        .layer(axum::middleware::from_fn(
+            crate::request_pool::bind_request_pool,
+        ))
 }
