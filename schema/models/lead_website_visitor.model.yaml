@@ -38,6 +38,12 @@ models:
   - name: LeadWebsiteVisitor
     collection: lead_website_visitors
     description: "Attribution link between a captured lead and the website visitor session that submitted it (lead-side M2M; plain uuids to website, no DB FK)"
+    # Table only: the website intake writes and reads these links through the
+    # hand-written persistence functions, on the caller's transaction. No
+    # entity, service or generic routes are generated for them.
+    generators:
+      enabled:
+        - sql
     fields:
       id:
         type: uuid

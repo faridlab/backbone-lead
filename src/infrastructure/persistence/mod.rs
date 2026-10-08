@@ -5,10 +5,12 @@
 //! Uses backbone-orm's `DatabaseOperations<T>` trait.
 
 mod lead_repository;
-mod lead_website_visitor_repository;
 
 // Custom persistence modules
 // <<< CUSTOM
+// The hand-written website intake persistence (user-owned).
+mod lead_website_visitor_repository;
+
 pub use lead_repository::{
     DuplicateKeyGroupRow, LeadForConvertRow, LeadForQualifyRow, LeadMatchRow, NewLeadRow,
 };
