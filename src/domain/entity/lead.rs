@@ -379,6 +379,8 @@ impl backbone_orm::EntityRepoMeta for Lead {
         m.insert("merged_into_lead_id".to_string(), "uuid".to_string());
         m.insert("source".to_string(), "lead_source".to_string());
         m.insert("status".to_string(), "lead_status".to_string());
+        m.insert("converted_at".to_string(), "timestamptz".to_string());
+        m.insert("merged_at".to_string(), "timestamptz".to_string());
         m
     }
     fn search_fields() -> &'static [&'static str] {

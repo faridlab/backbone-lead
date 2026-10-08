@@ -9,5 +9,4 @@ pub mod crud_test_base;
 pub mod lead_api_test;
 
 // Re-exports for convenience
-pub use crud_test_base::*;
 pub use lead_api_test::*;
