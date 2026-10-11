@@ -8,5 +8,3 @@ pub use backbone_core::{Specification, AndSpecification, OrSpecification, NotSpe
 
 pub mod lead_specification;
 
-// <<< CUSTOM
-// END CUSTOM

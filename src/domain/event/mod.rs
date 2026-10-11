@@ -8,8 +8,6 @@ pub mod lead_event_handlers;
 pub use lead_events::{LeadEvent, LeadEventPublisher, NoopLeadEventPublisher};
 pub use lead_event_handlers::LeadEventHandler;
 
-// <<< CUSTOM
-// END CUSTOM
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");

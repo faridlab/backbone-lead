@@ -6,5 +6,3 @@ pub mod lead_domain_policy;
 
 pub use lead_domain_policy::LeadDomainPolicy;
 
-// <<< CUSTOM
-// END CUSTOM

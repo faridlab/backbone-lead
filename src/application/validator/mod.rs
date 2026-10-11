@@ -9,5 +9,3 @@ pub mod lead_validator;
 
 pub use lead_validator::{LeadValidator, lead_validator};
 
-// <<< CUSTOM
-// END CUSTOM

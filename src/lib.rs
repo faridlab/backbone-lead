@@ -24,8 +24,6 @@ pub mod application;
 pub mod presentation;
 pub mod seeders;
 pub mod exports;
-// <<< CUSTOM MODULES
-// END CUSTOM
 
 // Re-exports for convenience - Domain entities
 pub use domain::entity::*;
@@ -54,8 +52,6 @@ use sqlx::PgPool;
 /// ```
 pub struct LeadModule {
     pub(crate) lead_service: Arc<LeadService>,
-    // <<< CUSTOM FIELDS
-    // END CUSTOM
 }
 
 impl LeadModule {
@@ -102,15 +98,11 @@ impl LeadModule {
             .merge(create_lead_read_routes(self.lead_service.clone()))
     }
 
-    // <<< CUSTOM METHODS
-    // END CUSTOM
 }
 
 /// Builder for LeadModule
 pub struct LeadModuleBuilder {
     db_pool: Option<PgPool>,
-    // <<< CUSTOM BUILDER FIELDS
-    // END CUSTOM
 }
 
 impl LeadModuleBuilder {
@@ -118,8 +110,6 @@ impl LeadModuleBuilder {
     pub fn new() -> Self {
         Self {
             db_pool: None,
-            // <<< CUSTOM BUILDER DEFAULTS
-            // END CUSTOM
         }
     }
 
@@ -129,8 +119,6 @@ impl LeadModuleBuilder {
         self
     }
 
-    // <<< CUSTOM - custom builder methods
-    // END CUSTOM
 
     /// Build the module with configured dependencies
     pub fn build(self) -> anyhow::Result<LeadModule> {
@@ -141,13 +129,9 @@ impl LeadModuleBuilder {
         let lead_repository = Arc::new(LeadRepository::new(db_pool.clone()));
         let lead_service = Arc::new(LeadService::with_repository(lead_repository.clone()));
 
-        // <<< CUSTOM
-        // END CUSTOM
 
         Ok(LeadModule {
             lead_service,
-            // <<< CUSTOM
-            // END CUSTOM
         })
     }
 }

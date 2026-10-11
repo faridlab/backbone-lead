@@ -9,12 +9,8 @@ pub use error::{ServiceError, ServiceResult};
 
 pub mod lead_service;
 
-// <<< CUSTOM
-// END CUSTOM
 
 pub use lead_service::LeadService;
-// <<< CUSTOM
-// END CUSTOM
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");

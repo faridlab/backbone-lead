@@ -7,13 +7,9 @@
 
 pub mod lead_handler;
 
-// <<< CUSTOM
-// END CUSTOM
 
 // Re-exports
 pub use lead_handler::{create_lead_routes, create_lead_read_routes, create_lead_write_routes};
-// <<< CUSTOM
-// END CUSTOM
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");
