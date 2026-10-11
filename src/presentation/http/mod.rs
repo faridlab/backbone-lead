@@ -8,11 +8,12 @@
 pub mod lead_handler;
 
 // <<< CUSTOM
-pub mod guarded_routes;
 // END CUSTOM
 
 // Re-exports
 pub use lead_handler::{create_lead_routes, create_lead_read_routes, create_lead_write_routes};
 // <<< CUSTOM
-pub use guarded_routes::{create_guarded_lead_routes, create_guarded_lead_routes_with_sink};
 // END CUSTOM
+
+// This directory's extension (hand-written; ADR-0031).
+include!("mod.ext.rs");
