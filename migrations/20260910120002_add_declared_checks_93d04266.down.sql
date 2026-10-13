@@ -1,0 +1,14 @@
+-- Down: drop the declared rule constraints for lead module
+ALTER TABLE IF EXISTS lead.lead_website_visitors DROP CONSTRAINT IF EXISTS ck_lead_website_visitors_website_visitor_id_required__required;
+ALTER TABLE IF EXISTS lead.lead_website_visitors DROP CONSTRAINT IF EXISTS ck_lead_website_visitors_website_id_required__required;
+ALTER TABLE IF EXISTS lead.lead_website_visitors DROP CONSTRAINT IF EXISTS ck_lead_website_visitors_lead_id_required__required;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_utm_campaign_max_length__max_length;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_utm_medium_max_length__max_length;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_utm_source_max_length__max_length;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_notes_max_length__max_length;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_email_max_length__max_length;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_whatsapp_no_max_length__max_length;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_phone_max_length__max_length;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_organization_name_max_length__max_length;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_lead_name_max_length__max_length;
+ALTER TABLE IF EXISTS lead.leads DROP CONSTRAINT IF EXISTS ck_leads_lead_name_required__required;
