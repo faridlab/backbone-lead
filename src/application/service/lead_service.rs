@@ -32,3 +32,73 @@ pub type LeadService = GenericCrudService<
     LeadRepository,
 >;
 
+/// The rules the schema declares for Lead, checked against the row a create or update
+/// would store. The generated build attaches it to [`LeadService`]. A refusing rule's
+/// break answers 422; a rule in shadow is logged under `backbone::write_guard` and the
+/// write goes ahead.
+pub struct LeadRowRules;
+
+#[async_trait::async_trait]
+impl backbone_core::write_guard::WriteGuard<Lead> for LeadRowRules {
+    async fn check(
+        &self,
+        ctx: &backbone_core::write_guard::WriteCtx<'_, Lead>,
+    ) -> backbone_core::write_guard::GuardOutcome {
+        use backbone_core::row_rule as r;
+        use backbone_core::violation::Violation;
+        use backbone_core::write_guard::{GuardOutcome, WriteKind};
+        let (create, update) = (ctx.kind == WriteKind::Create, ctx.kind == WriteKind::Update);
+        let Some(after) = ctx.after.filter(|_| create || update) else {
+            return GuardOutcome::allow();
+        };
+        let Ok(row) = serde_json::to_value(after) else {
+            return GuardOutcome::allow();
+        };
+        let row = &row;
+        let old = ctx.before.and_then(|b| serde_json::to_value(b).ok());
+        let mut shadow = Vec::new();
+        let mut refuse = Vec::new();
+        // `lead_name_required` (@required on Lead.lead_name)
+        if (create || (update && r::changed(old.as_ref(), row, &["lead_name"]))) && !r::holds(&r::and(r::is_not_null(r::field(row, "lead_name")), r::not(r::is_empty(r::trim(r::field(row, "lead_name")))))) {
+            refuse.push(Violation::new("lead_name", "required", "lead_name is required"));
+        }
+        // `lead_name_max_length` (@max(140) on Lead.lead_name)
+        if (create || (update && r::changed(old.as_ref(), row, &["lead_name"]))) && !r::holds(&r::le(r::length(r::field(row, "lead_name")), r::Val::Num(140.0_f64))) {
+            shadow.push(Violation::new("lead_name", "max_length", "lead_name must be at most 140 characters").with_param("max", 140_i64));
+        }
+        // `organization_name_max_length` (@max(140) on Lead.organization_name)
+        if (create || (update && r::changed(old.as_ref(), row, &["organization_name"]))) && !r::holds(&r::le(r::length(r::field(row, "organization_name")), r::Val::Num(140.0_f64))) {
+            shadow.push(Violation::new("organization_name", "max_length", "organization_name must be at most 140 characters").with_param("max", 140_i64));
+        }
+        // `phone_max_length` (@max(30) on Lead.phone)
+        if (create || (update && r::changed(old.as_ref(), row, &["phone"]))) && !r::holds(&r::le(r::length(r::field(row, "phone")), r::Val::Num(30.0_f64))) {
+            shadow.push(Violation::new("phone", "max_length", "phone must be at most 30 characters").with_param("max", 30_i64));
+        }
+        // `whatsapp_no_max_length` (@max(30) on Lead.whatsapp_no)
+        if (create || (update && r::changed(old.as_ref(), row, &["whatsapp_no"]))) && !r::holds(&r::le(r::length(r::field(row, "whatsapp_no")), r::Val::Num(30.0_f64))) {
+            shadow.push(Violation::new("whatsapp_no", "max_length", "whatsapp_no must be at most 30 characters").with_param("max", 30_i64));
+        }
+        // `email_max_length` (@max(160) on Lead.email)
+        if (create || (update && r::changed(old.as_ref(), row, &["email"]))) && !r::holds(&r::le(r::length(r::field(row, "email")), r::Val::Num(160.0_f64))) {
+            shadow.push(Violation::new("email", "max_length", "email must be at most 160 characters").with_param("max", 160_i64));
+        }
+        // `notes_max_length` (@max(2000) on Lead.notes)
+        if (create || (update && r::changed(old.as_ref(), row, &["notes"]))) && !r::holds(&r::le(r::length(r::field(row, "notes")), r::Val::Num(2000.0_f64))) {
+            shadow.push(Violation::new("notes", "max_length", "notes must be at most 2000 characters").with_param("max", 2000_i64));
+        }
+        // `utm_source_max_length` (@max(255) on Lead.utm_source)
+        if (create || (update && r::changed(old.as_ref(), row, &["utm_source"]))) && !r::holds(&r::le(r::length(r::field(row, "utm_source")), r::Val::Num(255.0_f64))) {
+            shadow.push(Violation::new("utm_source", "max_length", "utm_source must be at most 255 characters").with_param("max", 255_i64));
+        }
+        // `utm_medium_max_length` (@max(255) on Lead.utm_medium)
+        if (create || (update && r::changed(old.as_ref(), row, &["utm_medium"]))) && !r::holds(&r::le(r::length(r::field(row, "utm_medium")), r::Val::Num(255.0_f64))) {
+            shadow.push(Violation::new("utm_medium", "max_length", "utm_medium must be at most 255 characters").with_param("max", 255_i64));
+        }
+        // `utm_campaign_max_length` (@max(255) on Lead.utm_campaign)
+        if (create || (update && r::changed(old.as_ref(), row, &["utm_campaign"]))) && !r::holds(&r::le(r::length(r::field(row, "utm_campaign")), r::Val::Num(255.0_f64))) {
+            shadow.push(Violation::new("utm_campaign", "max_length", "utm_campaign must be at most 255 characters").with_param("max", 255_i64));
+        }
+        GuardOutcome { refuse, shadow }
+    }
+}
+

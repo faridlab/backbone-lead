@@ -11,6 +11,7 @@ pub mod lead_service;
 
 
 pub use lead_service::LeadService;
+pub use lead_service::LeadRowRules;
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");

@@ -127,7 +127,7 @@ impl LeadModuleBuilder {
 
         // Lead service
         let lead_repository = Arc::new(LeadRepository::new(db_pool.clone()));
-        let lead_service = Arc::new(LeadService::with_repository(lead_repository.clone()));
+        let lead_service = Arc::new(LeadService::with_repository(lead_repository.clone()).with_guard(Arc::new(crate::application::service::LeadRowRules)));
 
 
         Ok(LeadModule {
