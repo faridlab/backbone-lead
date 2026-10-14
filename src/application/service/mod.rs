@@ -13,5 +13,13 @@ pub mod lead_service;
 pub use lead_service::LeadService;
 pub use lead_service::LeadRowRules;
 
+/// A `LeadService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_lead_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::LeadRepository>,
+) -> LeadService {
+    LeadService::with_repository(repository).with_guard(std::sync::Arc::new(LeadRowRules))
+}
+
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");
