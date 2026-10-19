@@ -482,9 +482,6 @@ components:
       type: object
       required:
         - lead_name
-        - source
-        - status
-        - metadata
       properties:
         lead_name:
           type: string
@@ -553,8 +550,6 @@ components:
           nullable: true
           type: string
           format: date-time
-        metadata:
-          type: object
 
     UpdateLeadRequest:
       type: object
@@ -562,7 +557,6 @@ components:
         - lead_name
         - source
         - status
-        - metadata
       properties:
         lead_name:
           type: string
@@ -631,8 +625,6 @@ components:
           nullable: true
           type: string
           format: date-time
-        metadata:
-          type: object
 
     PatchLeadRequest:
       type: object
@@ -704,8 +696,6 @@ components:
           nullable: true
           type: string
           format: date-time
-        metadata:
-          type: object
 
     LeadList:
       type: object

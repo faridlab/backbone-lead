@@ -9,7 +9,7 @@ pub mod lead_handler;
 
 
 // Re-exports
-pub use lead_handler::{create_lead_routes, create_lead_read_routes, create_lead_write_routes};
+pub use lead_handler::{create_lead_routes, create_lead_read_routes, create_lead_write_routes, lead_permissions};
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");

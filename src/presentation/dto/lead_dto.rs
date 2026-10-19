@@ -41,9 +41,11 @@ pub struct CreateLeadDto {
     pub whatsapp_no: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    #[serde(default = "default_create_lead_source")]
     pub source: LeadSource,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "campaign_id")]
     pub campaign_id: Option<Uuid>,
+    #[serde(default = "default_create_lead_status")]
     pub status: LeadStatus,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "party_id")]
     pub party_id: Option<Uuid>,
@@ -65,6 +67,14 @@ pub struct CreateLeadDto {
     pub merged_into_lead_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "merged_at")]
     pub merged_at: Option<DateTime<Utc>>,
+}
+
+fn default_create_lead_source() -> LeadSource {
+    LeadSource::Whatsapp
+}
+
+fn default_create_lead_status() -> LeadStatus {
+    LeadStatus::New
 }
 
 // =============================================================================
@@ -131,40 +141,40 @@ pub struct PatchLeadDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "lead_name")]
     pub lead_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "organization_name")]
-    pub organization_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub phone: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "whatsapp_no")]
-    pub whatsapp_no: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub email: Option<String>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "organization_name")]
+    pub organization_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option")]
+    pub phone: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "whatsapp_no")]
+    pub whatsapp_no: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option")]
+    pub email: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<LeadSource>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "campaign_id")]
-    pub campaign_id: Option<Uuid>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "campaign_id")]
+    pub campaign_id: Option<Option<Uuid>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<LeadStatus>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "party_id")]
-    pub party_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "converted_at")]
-    pub converted_at: Option<DateTime<Utc>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "owner_user_id")]
-    pub owner_user_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "sales_team_id")]
-    pub sales_team_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "utm_source")]
-    pub utm_source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "utm_medium")]
-    pub utm_medium: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "utm_campaign")]
-    pub utm_campaign: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "merged_into_lead_id")]
-    pub merged_into_lead_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "merged_at")]
-    pub merged_at: Option<DateTime<Utc>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "party_id")]
+    pub party_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "converted_at")]
+    pub converted_at: Option<Option<DateTime<Utc>>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option")]
+    pub notes: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "owner_user_id")]
+    pub owner_user_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "sales_team_id")]
+    pub sales_team_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "utm_source")]
+    pub utm_source: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "utm_medium")]
+    pub utm_medium: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "utm_campaign")]
+    pub utm_campaign: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "merged_into_lead_id")]
+    pub merged_into_lead_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "merged_at")]
+    pub merged_at: Option<Option<DateTime<Utc>>>,
 }
 
 impl PatchLeadDto {
@@ -397,12 +407,4 @@ impl backbone_core::ApplyUpdateDto<UpdateLeadDto> for Lead {
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to Lead here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 
